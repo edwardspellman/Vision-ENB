@@ -14,12 +14,14 @@ import {
 import { useSocket } from '../context/SocketContext';
 import { getAvatarSvg, generateRandomName, getColorForString } from '../utils/avatar';
 import { sound } from '../utils/sound';
+import { getBackendUrl, setBackendUrl } from '../utils/config';
 
 export default function SettingsModal({ isOpen, onClose, soundMuted, setSoundMuted }) {
-  const { user, updateUserProfile, logout } = useSocket();
+  const { user, updateUserProfile, logout, reconnectWithUrl } = useSocket();
   const [name, setName] = useState(user.name);
   const [avatarSeed, setAvatarSeed] = useState(user.avatar || user.name);
   const [device, setDevice] = useState(user.device || 'desktop');
+  const [serverUrl, setServerUrl] = useState(() => getBackendUrl());
 
   if (!isOpen) return null;
 
@@ -33,6 +35,10 @@ export default function SettingsModal({ isOpen, onClose, soundMuted, setSoundMut
     e.preventDefault();
     if (!name.trim()) return;
 
+    setBackendUrl(serverUrl);
+    if (reconnectWithUrl) {
+      reconnectWithUrl(serverUrl);
+    }
     updateUserProfile({
       name: name.trim(),
       avatar: avatarSeed.trim(),
@@ -164,6 +170,21 @@ export default function SettingsModal({ isOpen, onClose, soundMuted, setSoundMut
                 sound.setMuted(muted);
               }}
               className="w-4 h-4 accent-[#00ff88] cursor-pointer"
+            />
+          </div>
+
+          {/* Server Connection URL Configurator */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-300 mb-1.5 flex items-center justify-between">
+              <span>Backend Server Address</span>
+              <span className="text-[10px] text-zinc-500 font-normal">LAN / Local Host</span>
+            </label>
+            <input
+              type="text"
+              value={serverUrl}
+              onChange={(e) => setServerUrl(e.target.value)}
+              placeholder="e.g. http://192.168.1.100:3000"
+              className="w-full bg-[#05080f] border border-[#1a263d] focus:border-[#00ff88] rounded-xl px-4 py-2 text-xs text-zinc-100 font-bold focus:outline-none"
             />
           </div>
 

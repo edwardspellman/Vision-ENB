@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, Send, Loader2 } from 'lucide-react';
+import { getBackendUrl } from '../utils/config';
 
 export default function VoiceRecorder({ onSendAudio, onCancel }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -13,9 +14,10 @@ export default function VoiceRecorder({ onSendAudio, onCancel }) {
   useEffect(() => {
     startRecording();
     return () => {
-      clearInterval(timerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
+        mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
@@ -23,25 +25,24 @@ export default function VoiceRecorder({ onSendAudio, onCancel }) {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (e) => {
+      mediaRecorderRef.current.ondataavailable = (e) => {
         if (e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
       };
 
-      mediaRecorder.start(100);
+      mediaRecorderRef.current.start();
       setIsRecording(true);
 
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
     } catch (err) {
-      console.error('Microphone error:', err);
-      alert('Microphone access unavailable.');
+      console.error('Microphone permission denied:', err);
+      alert('Microphone access is required to record voice notes.');
       onCancel();
     }
   };
@@ -59,7 +60,7 @@ export default function VoiceRecorder({ onSendAudio, onCancel }) {
       formData.append('file', audioBlob, `voice-note-${Date.now()}.webm`);
 
       try {
-        const res = await fetch('/api/upload', {
+        const res = await fetch(`${getBackendUrl()}/api/upload`, {
           method: 'POST',
           body: formData
         });

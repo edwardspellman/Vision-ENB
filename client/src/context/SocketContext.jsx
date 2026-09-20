@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { io } from 'socket.io-client';
 import { sound } from '../utils/sound';
 import { generateRandomName, getColorForString } from '../utils/avatar';
+import { getBackendUrl, discoverLanServer } from '../utils/config';
 
 const SocketContext = createContext();
 
@@ -55,10 +56,16 @@ export function SocketProvider({ children }) {
     localStorage.setItem('vision_user', JSON.stringify(user));
   }, [user]);
 
-  // Connect to Socket.IO server
-  useEffect(() => {
-    const socketInstance = io(window.location.origin, {
-      reconnectionAttempts: 15,
+  // Connect / Reconnect Socket.IO server
+  const initSocket = (customUrl) => {
+    if (socket) {
+      try {
+        socket.disconnect();
+      } catch (e) {}
+    }
+    const serverUrl = customUrl || getBackendUrl();
+    const socketInstance = io(serverUrl, {
+      reconnectionAttempts: 25,
       reconnectionDelay: 1000,
       transports: ['websocket', 'polling']
     });
@@ -72,8 +79,17 @@ export function SocketProvider({ children }) {
       setConnected(false);
     });
 
-    socketInstance.on('connect_error', (err) => {
-      console.warn('Socket link offline:', err.message);
+    socketInstance.on('connect_error', async (err) => {
+      setConnected(false);
+      setError('Searching local Wi-Fi network for Vision server...');
+
+      // Attempt LAN server auto-discovery
+      const foundUrl = await discoverLanServer();
+      if (foundUrl && foundUrl !== serverUrl) {
+        initSocket(foundUrl);
+      } else {
+        setError('Server offline. Tap Settings ⚙️ to set host IP (e.g. http://192.168.x.x:3000)');
+      }
     });
 
     // IP Info & default room
@@ -130,11 +146,19 @@ export function SocketProvider({ children }) {
     });
 
     setSocket(socketInstance);
+    return socketInstance;
+  };
 
+  useEffect(() => {
+    const activeSocket = initSocket();
     return () => {
-      socketInstance.disconnect();
+      if (activeSocket) activeSocket.disconnect();
     };
   }, []);
+
+  const reconnectWithUrl = (newUrl) => {
+    return initSocket(newUrl);
+  };
 
   // Automatically purge client messages: all chat history and media removed after 30 minutes
   useEffect(() => {
@@ -389,6 +413,7 @@ export function SocketProvider({ children }) {
         setTyping,
         toggleReaction,
         updateUserProfile,
+        reconnectWithUrl,
         passwordModalOpen,
         setPasswordModalOpen,
         pendingRoomId,

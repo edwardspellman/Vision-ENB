@@ -291,22 +291,66 @@ export function WebRTCProvider({ children }) {
   };
 
   /**
-   * Toggle Screen Sharing
+   * Toggle Screen Sharing / Casting
    */
   const toggleScreenShare = async () => {
     if (!peerConnectionRef.current) return;
 
     if (!isScreenSharing) {
       try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        let screenStream = null;
+
+        // 1. Attempt displayMedia screen capture
+        if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
+          try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({
+              video: {
+                displaySurface: 'monitor',
+                logicalSurface: true,
+                cursor: 'always'
+              },
+              audio: false
+            });
+          } catch (displayErr) {
+            console.warn('getDisplayMedia failed or permission denied, trying fallback:', displayErr);
+          }
+        }
+
+        // 2. Android WebView Fallback: if getDisplayMedia is unsupported or denied, fallback to camera video capture
+        if (!screenStream) {
+          try {
+            screenStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'environment' }
+            });
+          } catch (cameraErr) {
+            throw new Error('Screen cast / camera capture is not supported or permission denied on this device.');
+          }
+        }
+
         const screenTrack = screenStream.getVideoTracks()[0];
+        if (!screenTrack) {
+          throw new Error('No video track found for screen share.');
+        }
 
-        const sender = peerConnectionRef.current
-          .getSenders()
-          .find((s) => s.track && s.track.kind === 'video');
+        // 3. Attach track to Peer Connection
+        const senders = peerConnectionRef.current.getSenders();
+        const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
 
-        if (sender) {
-          sender.replaceTrack(screenTrack);
+        if (videoSender) {
+          await videoSender.replaceTrack(screenTrack);
+        } else {
+          // VOICE CALL FIX: Dynamically add video track to peer connection during voice call!
+          peerConnectionRef.current.addTrack(screenTrack, screenStream);
+
+          // Renegotiate WebRTC offer so recipient receives screen stream
+          if (socket && activePeerSocketId.current) {
+            const offer = await peerConnectionRef.current.createOffer();
+            await peerConnectionRef.current.setLocalDescription(offer);
+            socket.emit('webrtc_offer', {
+              targetSocketId: activePeerSocketId.current,
+              sdp: offer
+            });
+          }
         }
 
         if (localVideoRef.current) {
@@ -317,9 +361,11 @@ export function WebRTCProvider({ children }) {
           stopScreenSharing();
         };
 
+        setIsVideoCall(true);
         setIsScreenSharing(true);
       } catch (err) {
         console.error('Screen sharing error:', err);
+        alert(err.message || 'Screen sharing is unavailable on this device.');
       }
     } else {
       stopScreenSharing();
@@ -327,18 +373,20 @@ export function WebRTCProvider({ children }) {
   };
 
   const stopScreenSharing = async () => {
-    if (!localStreamRef.current) return;
-    const cameraTrack = localStreamRef.current.getVideoTracks()[0];
-    const sender = peerConnectionRef.current
-      ?.getSenders()
-      ?.find((s) => s.track && s.track.kind === 'video');
+    if (!peerConnectionRef.current) return;
 
-    if (sender && cameraTrack) {
-      sender.replaceTrack(cameraTrack);
+    const cameraTrack = localStreamRef.current ? localStreamRef.current.getVideoTracks()[0] : null;
+    const senders = peerConnectionRef.current.getSenders();
+    const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+
+    if (videoSender && cameraTrack) {
+      await videoSender.replaceTrack(cameraTrack);
     }
+
     if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStreamRef.current;
+      localVideoRef.current.srcObject = localStreamRef.current || null;
     }
+
     setIsScreenSharing(false);
   };
 

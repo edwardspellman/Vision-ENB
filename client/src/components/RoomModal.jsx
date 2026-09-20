@@ -404,17 +404,6 @@ export default function RoomModal({ isOpen, onClose, initialTab = 'create' }) {
               </div>
             </form>
           )}
-
-          {/* Return to Wi-Fi Room */}
-          <div className="mt-5 pt-3.5 border-t border-[#161f30] text-center">
-            <button
-              onClick={handleJoinLocalNetwork}
-              className="text-xs text-zinc-400 hover:text-cyan-400 flex items-center justify-center space-x-1.5 mx-auto transition font-medium"
-            >
-              <Wifi className="w-3.5 h-3.5" />
-              <span>Back to Local Wi-Fi Network</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

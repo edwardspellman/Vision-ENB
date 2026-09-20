@@ -105,57 +105,55 @@ export default function Header({
         </div>
       </div>
 
-      {/* Right Controls (Top Bar Access Panel - Hidden on Mobile Android / iOS) */}
-      {!isMobileDevice && (
-        <div className="hidden md:flex items-center space-x-1.5 sm:space-x-2 shrink-0">
-          {/* Switch / Create Room Button */}
-          <button
-            onClick={onOpenRoomModal}
-            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
-            title="Create or Join Room"
-          >
-            <Plus className="w-3.5 h-3.5 text-[#00ff88]" />
-            <span className="hidden sm:inline">Create Room</span>
-          </button>
+      {/* Right Controls */}
+      <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+        {/* Switch / Create Room Button */}
+        <button
+          onClick={onOpenRoomModal}
+          className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
+          title="Create or Join Room"
+        >
+          <Plus className="w-3.5 h-3.5 text-[#00ff88]" />
+          <span className="hidden sm:inline">Room</span>
+        </button>
 
-          {/* Share Room Button */}
-          <button
-            onClick={onOpenShareModal}
-            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
-            title="Share Room / Invite Link"
-          >
-            <Share2 className="w-3.5 h-3.5 text-[#00ff88]" />
-            <span className="hidden sm:inline">Share</span>
-          </button>
+        {/* Share Room Button */}
+        <button
+          onClick={onOpenShareModal}
+          className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
+          title="Share Room / Invite Link"
+        >
+          <Share2 className="w-3.5 h-3.5 text-[#00ff88]" />
+          <span className="hidden sm:inline">Share</span>
+        </button>
 
-          {/* Audio Mute Toggle */}
-          <button
-            onClick={handleToggleMute}
-            className={`p-2 rounded-lg border transition ${
-              soundMuted 
-                ? 'bg-[#0b101c] border-[#1a263d] text-zinc-500' 
-                : 'bg-[#0b101c] border-[#1a263d] text-[#00ff88] hover:border-[#00ff88]/40'
-            }`}
-            title={soundMuted ? 'Unmute sounds' : 'Mute sounds'}
-          >
-            {soundMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-          </button>
+        {/* Audio Mute Toggle */}
+        <button
+          onClick={handleToggleMute}
+          className={`p-1.5 rounded-lg border transition ${
+            soundMuted 
+              ? 'bg-[#0b101c] border-[#1a263d] text-zinc-500' 
+              : 'bg-[#0b101c] border-[#1a263d] text-[#00ff88] hover:border-[#00ff88]/40'
+          }`}
+          title={soundMuted ? 'Unmute sounds' : 'Mute sounds'}
+        >
+          {soundMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+        </button>
 
-          {/* User Profile Pill */}
-          <button
-            onClick={onOpenSettingsModal}
-            className="flex items-center space-x-2 pl-2.5 pr-1.5 py-1 rounded-lg bg-[#080d17] hover:bg-[#0f1626] border border-[#1a263d] hover:border-[#00ff88]/40 transition group"
-            title="Profile & Settings"
-          >
-            <span className="text-xs font-semibold text-zinc-200 group-hover:text-[#00ff88] max-w-[90px] truncate hidden md:inline">
-              {user.name}
-            </span>
-            <div className="w-6 h-6 rounded-md overflow-hidden border border-[#1a263d] group-hover:border-[#00ff88]/50 transition">
-              <img src={getAvatarSvg(user.avatar || user.name)} alt={user.name} className="w-full h-full object-cover" />
-            </div>
-          </button>
-        </div>
-      )}
+        {/* User Profile / Settings Pill */}
+        <button
+          onClick={onOpenSettingsModal}
+          className="flex items-center space-x-1.5 p-1 rounded-lg bg-[#080d17] hover:bg-[#0f1626] border border-[#1a263d] hover:border-[#00ff88]/40 transition group"
+          title="Profile & Settings"
+        >
+          <span className="text-xs font-semibold text-zinc-200 group-hover:text-[#00ff88] max-w-[80px] truncate hidden md:inline">
+            {user.name}
+          </span>
+          <div className="w-6 h-6 rounded-md overflow-hidden border border-[#1a263d] group-hover:border-[#00ff88]/50 transition">
+            <img src={getAvatarSvg(user.avatar || user.name)} alt={user.name} className="w-full h-full object-cover" />
+          </div>
+        </button>
+      </div>
     </header>
   );
 }

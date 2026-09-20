@@ -30,6 +30,13 @@ function MainApp() {
     return localStorage.getItem('vision_sound_muted') === 'true';
   });
 
+  // Automatically prompt Room Gateway when authenticated and no active room
+  React.useEffect(() => {
+    if (!showSplash && isAuthenticated && !currentRoom) {
+      setIsRoomModalOpen(true);
+    }
+  }, [showSplash, isAuthenticated, currentRoom]);
+
   const handleOpenRoomModal = (tab = 'create') => {
     setRoomModalTab(tab);
     setIsRoomModalOpen(true);
@@ -40,7 +47,7 @@ function MainApp() {
       {/* 1. Initial Wormhole Splash Screen */}
       {showSplash && (
         <InitialLoader
-          isReady={connected && Boolean(currentRoom)}
+          isReady={connected}
           onFinish={() => setShowSplash(false)}
         />
       )}

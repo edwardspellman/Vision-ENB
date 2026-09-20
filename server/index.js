@@ -69,7 +69,7 @@ const io = new Server(server, {
     origin: '*',
     methods: ['GET', 'POST']
   },
-  maxHttpBufferSize: 1e7
+  maxHttpBufferSize: 5e7
 });
 
 socketHandler(io);

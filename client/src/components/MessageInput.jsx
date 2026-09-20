@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { getBackendUrl } from '../utils/config';
 import { 
   Send, 
   Paperclip, 
@@ -90,7 +91,7 @@ export default function MessageInput({
       formData.append('file', selectedFile);
 
       try {
-        const res = await fetch('/api/upload', {
+        const res = await fetch(`${getBackendUrl()}/api/upload`, {
           method: 'POST',
           body: formData
         });

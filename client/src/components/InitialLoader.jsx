@@ -14,10 +14,21 @@ export default function InitialLoader({ isReady, onFinish }) {
   useEffect(() => {
     const interval = setInterval(() => {
       setLogIndex((prev) => (prev < BOOT_LOGS.length - 1 ? prev + 1 : prev));
-    }, 350);
+    }, 300);
 
-    return () => clearInterval(interval);
-  }, []);
+    // Absolute max timeout safety: force finish after 3 seconds max so app is NEVER stuck
+    const safetyTimer = setTimeout(() => {
+      setFadingOut(true);
+      setTimeout(() => {
+        onFinish();
+      }, 400);
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(safetyTimer);
+    };
+  }, [onFinish]);
 
   useEffect(() => {
     if (isReady && logIndex >= BOOT_LOGS.length - 2) {
@@ -25,8 +36,8 @@ export default function InitialLoader({ isReady, onFinish }) {
         setFadingOut(true);
         setTimeout(() => {
           onFinish();
-        }, 500);
-      }, 600);
+        }, 400);
+      }, 400);
       return () => clearTimeout(timer);
     }
   }, [isReady, logIndex, onFinish]);

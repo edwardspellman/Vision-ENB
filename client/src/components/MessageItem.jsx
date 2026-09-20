@@ -212,6 +212,45 @@ export default function MessageItem({ message, onImageClick }) {
             )
           )}
 
+          {/* Video Content */}
+          {message.type === 'video' && (
+            <div className="space-y-1.5">
+              {mediaExpired ? (
+                <div className="p-3 rounded-lg bg-[#04060a] border border-[#161f30] text-zinc-500 text-xs font-mono">
+                  <span>⏱️ Video expired (30m Ephemeral Purge)</span>
+                </div>
+              ) : (
+                <div className="rounded-lg overflow-hidden max-w-sm border border-[#161f30] bg-[#020408]">
+                  <video
+                    src={message.fileUrl}
+                    controls
+                    preload="metadata"
+                    onError={() => setMediaExpired(true)}
+                    className="w-full max-h-72 rounded-lg object-contain"
+                  />
+                  {message.fileName && (
+                    <div className="p-2 flex items-center justify-between text-[11px] text-zinc-400 bg-[#05080f] border-t border-[#161f30]">
+                      <span className="truncate max-w-[200px] font-semibold">{message.fileName}</span>
+                      <a
+                        href={message.fileUrl}
+                        download={message.fileName || 'video'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#00ff88] hover:underline flex items-center space-x-1 shrink-0 ml-2"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>Save</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+              {message.text && (
+                <p className="text-xs text-zinc-400 mt-1">{message.text}</p>
+              )}
+            </div>
+          )}
+
           {/* File Attachment */}
           {message.type === 'file' && (
             <a
