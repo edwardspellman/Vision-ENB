@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { 
   Phone, 
   PhoneOff, 
@@ -21,6 +21,8 @@ export default function VideoCallModal() {
     isMuted,
     isCameraOff,
     isScreenSharing,
+    remoteStream,
+    localStream,
     localVideoRef,
     remoteVideoRef,
     acceptCall,
@@ -30,6 +32,22 @@ export default function VideoCallModal() {
     toggleCamera,
     toggleScreenShare
   } = useWebRTC();
+
+  // Bind remote stream to remote video element whenever stream or state changes
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(err => console.warn('Remote video playback auto-play prevented:', err));
+    }
+  }, [remoteStream, callState]);
+
+  // Bind local stream to local PIP video element
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(err => console.warn('Local video playback error:', err));
+    }
+  }, [localStream, isScreenSharing, callState]);
 
   if (callState === 'idle') return null;
 
@@ -51,7 +69,7 @@ export default function VideoCallModal() {
           </h3>
           <p className="text-xs text-[#00ff88] font-semibold mb-6 flex items-center justify-center space-x-1">
             <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-ping" />
-            <span>Incoming {isVideoCall ? 'Video' : 'Audio'} Call...</span>
+            <span>Incoming {isVideoCall ? 'Video' : 'Voice'} Call...</span>
           </p>
 
           <div className="flex items-center justify-center space-x-4">
@@ -112,49 +130,65 @@ export default function VideoCallModal() {
   }
 
   // Active Call Screen
+  const hasRemoteVideoTrack = isVideoCall || isScreenSharing;
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black font-mono">
-      {/* Remote Video */}
+    <div className="fixed inset-0 z-50 flex flex-col bg-black font-mono select-none">
+      {/* Remote Video Container */}
       <div className="flex-1 relative bg-[#020305] flex items-center justify-center overflow-hidden">
         <video
           ref={remoteVideoRef}
           autoPlay
           playsInline
-          className="w-full h-full object-contain"
+          className={`w-full h-full object-contain ${!hasRemoteVideoTrack ? 'invisible absolute' : 'block'}`}
         />
 
-        {/* Audio fallback */}
-        {(!isVideoCall || !remoteVideoRef.current?.srcObject) && (
+        {/* Status indicator pill top-left */}
+        <div className="absolute top-4 left-4 z-30 flex items-center space-x-2 bg-[#080d17]/80 backdrop-blur border border-[#1a263d] px-3 py-1.5 rounded-full text-xs font-semibold text-zinc-200 shadow-xl">
+          <span className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse" />
+          <span>
+            {isScreenSharing ? 'Screen Casting' : isVideoCall ? 'Video Call' : 'Voice Call'}
+          </span>
+        </div>
+
+        {/* Voice Call / Video Off Fallback Overlay */}
+        {!hasRemoteVideoTrack && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#05080f]">
-            <div className="w-24 h-24 rounded-2xl border border-[#00ff88]/40 overflow-hidden mb-3 shadow-2xl">
+            <div className="w-24 h-24 rounded-2xl border border-[#00ff88]/40 overflow-hidden mb-3 shadow-2xl relative">
               <img
                 src={getAvatarSvg(remoteUser?.avatar || remoteUser?.name || 'remote')}
                 alt="Remote"
                 className="w-full h-full object-cover"
               />
+              <div className="absolute inset-0 bg-[#00ff88]/10 animate-pulse" />
             </div>
             <h3 className="text-lg font-bold text-zinc-100">
               {remoteUser?.name || 'Connected User'}
             </h3>
-            <p className="text-xs text-[#00ff88] mt-1 font-semibold">Active Call</p>
+            <p className="text-xs text-[#00ff88] mt-1 font-semibold flex items-center space-x-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-ping" />
+              <span>Voice Call Connected</span>
+            </p>
           </div>
         )}
 
         {/* Local PIP Video */}
-        <div className="absolute bottom-20 right-4 w-32 sm:w-44 aspect-video bg-[#05080f] rounded-xl overflow-hidden border border-[#00ff88]/40 shadow-2xl z-20">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : ''}`}
-          />
-          {isCameraOff && (
-            <div className="w-full h-full flex items-center justify-center bg-[#080d17] text-zinc-400 text-xs font-semibold">
-              Camera Off
-            </div>
-          )}
-        </div>
+        {isVideoCall && (
+          <div className="absolute bottom-20 right-4 w-32 sm:w-44 aspect-video bg-[#05080f] rounded-xl overflow-hidden border border-[#00ff88]/40 shadow-2xl z-20">
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : ''}`}
+            />
+            {isCameraOff && (
+              <div className="w-full h-full flex items-center justify-center bg-[#080d17] text-zinc-400 text-xs font-semibold">
+                Camera Off
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Control Bar */}
@@ -169,22 +203,24 @@ export default function VideoCallModal() {
           {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
 
-        <button
-          onClick={toggleCamera}
-          className={`p-3 rounded-full border transition ${
-            isCameraOff ? 'bg-[#ff3366] text-black border-[#ff3366]' : 'bg-[#05080f] text-zinc-300 border-[#1a263d] hover:border-[#00ff88]'
-          }`}
-          title={isCameraOff ? 'Turn Camera On' : 'Turn Camera Off'}
-        >
-          {isCameraOff ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-        </button>
+        {isVideoCall && (
+          <button
+            onClick={toggleCamera}
+            className={`p-3 rounded-full border transition ${
+              isCameraOff ? 'bg-[#ff3366] text-black border-[#ff3366]' : 'bg-[#05080f] text-zinc-300 border-[#1a263d] hover:border-[#00ff88]'
+            }`}
+            title={isCameraOff ? 'Turn Camera On' : 'Turn Camera Off'}
+          >
+            {isCameraOff ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+          </button>
+        )}
 
         <button
           onClick={toggleScreenShare}
           className={`p-3 rounded-full border transition ${
             isScreenSharing ? 'bg-[#00f0ff] text-black border-[#00f0ff]' : 'bg-[#05080f] text-zinc-300 border-[#1a263d] hover:border-[#00f0ff]'
           }`}
-          title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+          title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen / Cast'}
         >
           {isScreenSharing ? <MonitorOff className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
         </button>

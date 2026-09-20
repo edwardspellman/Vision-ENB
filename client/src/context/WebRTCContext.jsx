@@ -20,12 +20,17 @@ export function WebRTCProvider({ children }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
 
   const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const activePeerSocketId = useRef(null);
+  const pendingIceCandidatesRef = useRef([]);
+  const wasVoiceCallRef = useRef(false);
 
   // Setup WebRTC socket listeners
   useEffect(() => {
@@ -34,13 +39,14 @@ export function WebRTCProvider({ children }) {
     // Incoming call
     socket.on('webrtc_incoming_call', ({ callerSocketId, callerUser, isVideo }) => {
       if (callState !== 'idle') {
-        // Automatically busy reject if already in a call
+        // Automatically reject with busy state if already in a call
         socket.emit('webrtc_reject_call', { callerSocketId });
         return;
       }
       activePeerSocketId.current = callerSocketId;
       setCallerInfo({ socketId: callerSocketId, user: callerUser });
       setIsVideoCall(isVideo);
+      wasVoiceCallRef.current = !isVideo;
       setCallState('incoming');
     });
 
@@ -66,11 +72,21 @@ export function WebRTCProvider({ children }) {
       cleanupCall();
     });
 
-    // SDP Offer Received
+    // SDP Offer Received (Supports initial offer + renegotiation for screen casting)
     socket.on('webrtc_offer', async ({ callerSocketId, sdp }) => {
       try {
-        const pc = createPeerConnection(callerSocketId);
+        let pc = peerConnectionRef.current;
+        if (!pc || pc.signalingState === 'closed') {
+          pc = createPeerConnection(callerSocketId);
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+        // Flush any queued ICE candidates
+        while (pendingIceCandidatesRef.current.length > 0) {
+          const cand = pendingIceCandidatesRef.current.shift();
+          await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.warn('ICE add error:', e));
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit('webrtc_answer', { targetSocketId: callerSocketId, sdp: answer });
@@ -82,8 +98,15 @@ export function WebRTCProvider({ children }) {
     // SDP Answer Received
     socket.on('webrtc_answer', async ({ responderSocketId, sdp }) => {
       try {
-        if (peerConnectionRef.current) {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(sdp));
+        const pc = peerConnectionRef.current;
+        if (pc && pc.signalingState !== 'closed') {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+          // Flush queued ICE candidates
+          while (pendingIceCandidatesRef.current.length > 0) {
+            const cand = pendingIceCandidatesRef.current.shift();
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.warn('ICE add error:', e));
+          }
         }
       } catch (err) {
         console.error('Failed handling answer:', err);
@@ -93,8 +116,13 @@ export function WebRTCProvider({ children }) {
     // ICE Candidate Received
     socket.on('webrtc_ice_candidate', async ({ senderSocketId, candidate }) => {
       try {
-        if (peerConnectionRef.current && candidate) {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        const pc = peerConnectionRef.current;
+        if (candidate) {
+          if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } else {
+            pendingIceCandidatesRef.current.push(candidate);
+          }
         }
       } catch (err) {
         console.error('Failed adding ICE candidate:', err);
@@ -121,12 +149,13 @@ export function WebRTCProvider({ children }) {
    * Helper to create RTCPeerConnection and bind media streams
    */
   const createPeerConnection = (targetSocketId) => {
-    if (peerConnectionRef.current) {
+    if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== 'closed') {
       peerConnectionRef.current.close();
     }
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerConnectionRef.current = pc;
+    pendingIceCandidatesRef.current = [];
 
     // Add local tracks to peer connection
     if (localStreamRef.current) {
@@ -135,10 +164,13 @@ export function WebRTCProvider({ children }) {
       });
     }
 
-    // Handle remote track
+    // Handle incoming remote track
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current && event.streams[0]) {
-        remoteVideoRef.current.srcObject = event.streams[0];
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0]);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
       }
     };
 
@@ -163,13 +195,15 @@ export function WebRTCProvider({ children }) {
       activePeerSocketId.current = targetSocketId;
       setRemoteUser(targetUser);
       setIsVideoCall(isVideo);
+      wasVoiceCallRef.current = !isVideo;
       setCallState('calling');
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: isVideo,
+        video: isVideo ? { facingMode: 'user' } : false,
         audio: true
       });
       localStreamRef.current = stream;
+      setLocalStream(stream);
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -196,10 +230,11 @@ export function WebRTCProvider({ children }) {
       setRemoteUser(callerInfo.user);
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: isVideoCall,
+        video: isVideoCall ? { facingMode: 'user' } : false,
         audio: true
       });
       localStreamRef.current = stream;
+      setLocalStream(stream);
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -244,6 +279,10 @@ export function WebRTCProvider({ children }) {
    * Full cleanup of media streams and state
    */
   const cleanupCall = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
@@ -256,12 +295,16 @@ export function WebRTCProvider({ children }) {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
     activePeerSocketId.current = null;
+    pendingIceCandidatesRef.current = [];
+    wasVoiceCallRef.current = false;
     setCallerInfo(null);
     setRemoteUser(null);
     setCallState('idle');
     setIsMuted(false);
     setIsCameraOff(false);
     setIsScreenSharing(false);
+    setRemoteStream(null);
+    setLocalStream(null);
   };
 
   /**
@@ -304,11 +347,7 @@ export function WebRTCProvider({ children }) {
         if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
           try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({
-              video: {
-                displaySurface: 'monitor',
-                logicalSurface: true,
-                cursor: 'always'
-              },
+              video: { cursor: 'always' },
               audio: false
             });
           } catch (displayErr) {
@@ -316,7 +355,7 @@ export function WebRTCProvider({ children }) {
           }
         }
 
-        // 2. Android WebView Fallback: if getDisplayMedia is unsupported or denied, fallback to camera video capture
+        // 2. Fallback: if getDisplayMedia is unsupported or denied, fallback to camera capture
         if (!screenStream) {
           try {
             screenStream = await navigator.mediaDevices.getUserMedia({
@@ -327,19 +366,20 @@ export function WebRTCProvider({ children }) {
           }
         }
 
+        screenStreamRef.current = screenStream;
         const screenTrack = screenStream.getVideoTracks()[0];
         if (!screenTrack) {
           throw new Error('No video track found for screen share.');
         }
 
-        // 3. Attach track to Peer Connection
+        // Attach track to Peer Connection
         const senders = peerConnectionRef.current.getSenders();
         const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
 
         if (videoSender) {
           await videoSender.replaceTrack(screenTrack);
         } else {
-          // VOICE CALL FIX: Dynamically add video track to peer connection during voice call!
+          // Voice Call Fix: Add video track dynamically to peer connection
           peerConnectionRef.current.addTrack(screenTrack, screenStream);
 
           // Renegotiate WebRTC offer so recipient receives screen stream
@@ -372,15 +412,31 @@ export function WebRTCProvider({ children }) {
     }
   };
 
+  /**
+   * Stop Screen Sharing and revert state
+   */
   const stopScreenSharing = async () => {
     if (!peerConnectionRef.current) return;
+
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
 
     const cameraTrack = localStreamRef.current ? localStreamRef.current.getVideoTracks()[0] : null;
     const senders = peerConnectionRef.current.getSenders();
     const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
 
-    if (videoSender && cameraTrack) {
-      await videoSender.replaceTrack(cameraTrack);
+    if (videoSender) {
+      if (cameraTrack) {
+        await videoSender.replaceTrack(cameraTrack);
+      } else {
+        await videoSender.replaceTrack(null);
+      }
+    }
+
+    if (wasVoiceCallRef.current) {
+      setIsVideoCall(false);
     }
 
     if (localVideoRef.current) {
@@ -388,6 +444,20 @@ export function WebRTCProvider({ children }) {
     }
 
     setIsScreenSharing(false);
+
+    // Send updated SDP offer to peer so screen cast stops on remote side
+    if (socket && activePeerSocketId.current) {
+      try {
+        const offer = await peerConnectionRef.current.createOffer();
+        await peerConnectionRef.current.setLocalDescription(offer);
+        socket.emit('webrtc_offer', {
+          targetSocketId: activePeerSocketId.current,
+          sdp: offer
+        });
+      } catch (err) {
+        console.warn('Renegotiation after stop screen share failed:', err);
+      }
+    }
   };
 
   return (
@@ -400,6 +470,8 @@ export function WebRTCProvider({ children }) {
         isMuted,
         isCameraOff,
         isScreenSharing,
+        remoteStream,
+        localStream,
         localVideoRef,
         remoteVideoRef,
         startCall,
