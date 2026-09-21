@@ -20,6 +20,7 @@ export function WebRTCProvider({ children }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [facingMode, setFacingMode] = useState('user'); // 'user' | 'environment'
   const [remoteStream, setRemoteStream] = useState(null);
   const [localStream, setLocalStream] = useState(null);
 
@@ -72,7 +73,7 @@ export function WebRTCProvider({ children }) {
       cleanupCall();
     });
 
-    // SDP Offer Received (Supports initial offer + renegotiation for screen casting)
+    // SDP Offer Received (Supports initial offer + renegotiation for mobile screen casting)
     socket.on('webrtc_offer', async ({ callerSocketId, sdp }) => {
       try {
         let pc = peerConnectionRef.current;
@@ -196,6 +197,7 @@ export function WebRTCProvider({ children }) {
       setRemoteUser(targetUser);
       setIsVideoCall(isVideo);
       wasVoiceCallRef.current = !isVideo;
+      setFacingMode('user');
       setCallState('calling');
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -228,6 +230,7 @@ export function WebRTCProvider({ children }) {
     try {
       setCallState('connected');
       setRemoteUser(callerInfo.user);
+      setFacingMode('user');
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: isVideoCall ? { facingMode: 'user' } : false,
@@ -303,6 +306,7 @@ export function WebRTCProvider({ children }) {
     setIsMuted(false);
     setIsCameraOff(false);
     setIsScreenSharing(false);
+    setFacingMode('user');
     setRemoteStream(null);
     setLocalStream(null);
   };
@@ -334,7 +338,55 @@ export function WebRTCProvider({ children }) {
   };
 
   /**
-   * Toggle Screen Sharing / Casting
+   * Mobile Camera Switch (Front <-> Rear Camera)
+   */
+  const switchCamera = async () => {
+    if (!localStreamRef.current || !peerConnectionRef.current) return;
+    const newMode = facingMode === 'user' ? 'environment' : 'user';
+
+    try {
+      let newCamStream = null;
+      try {
+        newCamStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: newMode } },
+          audio: false
+        });
+      } catch (exactErr) {
+        newCamStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: newMode },
+          audio: false
+        });
+      }
+
+      const newTrack = newCamStream.getVideoTracks()[0];
+      if (newTrack) {
+        const senders = peerConnectionRef.current.getSenders();
+        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+
+        if (videoSender) {
+          await videoSender.replaceTrack(newTrack);
+        }
+
+        const oldTrack = localStreamRef.current.getVideoTracks()[0];
+        if (oldTrack) oldTrack.stop();
+
+        localStreamRef.current.removeTrack(oldTrack);
+        localStreamRef.current.addTrack(newTrack);
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+
+        setFacingMode(newMode);
+      }
+    } catch (err) {
+      console.error('Failed switching camera on mobile:', err);
+    }
+  };
+
+  /**
+   * Toggle Screen Sharing / Mobile Screen Cast
    */
   const toggleScreenShare = async () => {
     if (!peerConnectionRef.current) return;
@@ -343,26 +395,35 @@ export function WebRTCProvider({ children }) {
       try {
         let screenStream = null;
 
-        // 1. Attempt displayMedia screen capture
+        // 1. Mobile & Desktop displayMedia screen capture (No desktop-only constraints)
         if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
           try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({
-              video: { cursor: 'always' },
+              video: true,
               audio: false
             });
           } catch (displayErr) {
-            console.warn('getDisplayMedia failed or permission denied, trying fallback:', displayErr);
+            console.warn('getDisplayMedia primary failed, trying secondary fallback:', displayErr);
+            try {
+              screenStream = await navigator.mediaDevices.getDisplayMedia({ video: {} });
+            } catch (err2) {
+              console.warn('getDisplayMedia secondary failed:', err2);
+            }
           }
         }
 
-        // 2. Fallback: if getDisplayMedia is unsupported or denied, fallback to camera capture
+        // 2. Mobile WebView / Camera Cast Fallback: If getDisplayMedia is unsupported or denied by OS, fallback to rear camera environment cast
         if (!screenStream) {
           try {
             screenStream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: 'environment' }
+              video: { facingMode: { ideal: 'environment' } },
+              audio: false
             });
           } catch (cameraErr) {
-            throw new Error('Screen cast / camera capture is not supported or permission denied on this device.');
+            screenStream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false
+            });
           }
         }
 
@@ -382,7 +443,7 @@ export function WebRTCProvider({ children }) {
           // Voice Call Fix: Add video track dynamically to peer connection
           peerConnectionRef.current.addTrack(screenTrack, screenStream);
 
-          // Renegotiate WebRTC offer so recipient receives screen stream
+          // Trigger SDP offer renegotiation so recipient receives screen stream
           if (socket && activePeerSocketId.current) {
             const offer = await peerConnectionRef.current.createOffer();
             await peerConnectionRef.current.setLocalDescription(offer);
@@ -404,7 +465,7 @@ export function WebRTCProvider({ children }) {
         setIsVideoCall(true);
         setIsScreenSharing(true);
       } catch (err) {
-        console.error('Screen sharing error:', err);
+        console.error('Screen sharing / mobile cast error:', err);
         alert(err.message || 'Screen sharing is unavailable on this device.');
       }
     } else {
@@ -413,7 +474,7 @@ export function WebRTCProvider({ children }) {
   };
 
   /**
-   * Stop Screen Sharing and revert state
+   * Stop Screen Sharing / Mobile Cast and revert state
    */
   const stopScreenSharing = async () => {
     if (!peerConnectionRef.current) return;
@@ -470,6 +531,7 @@ export function WebRTCProvider({ children }) {
         isMuted,
         isCameraOff,
         isScreenSharing,
+        facingMode,
         remoteStream,
         localStream,
         localVideoRef,
@@ -480,6 +542,7 @@ export function WebRTCProvider({ children }) {
         endCall,
         toggleMic,
         toggleCamera,
+        switchCamera,
         toggleScreenShare
       }}
     >

@@ -7,7 +7,8 @@ import {
   Mic, 
   MicOff, 
   Monitor, 
-  MonitorOff 
+  MonitorOff,
+  RefreshCw
 } from 'lucide-react';
 import { useWebRTC } from '../context/WebRTCContext';
 import { getAvatarSvg } from '../utils/avatar';
@@ -21,6 +22,7 @@ export default function VideoCallModal() {
     isMuted,
     isCameraOff,
     isScreenSharing,
+    facingMode,
     remoteStream,
     localStream,
     localVideoRef,
@@ -30,6 +32,7 @@ export default function VideoCallModal() {
     endCall,
     toggleMic,
     toggleCamera,
+    switchCamera,
     toggleScreenShare
   } = useWebRTC();
 
@@ -140,6 +143,8 @@ export default function VideoCallModal() {
           ref={remoteVideoRef}
           autoPlay
           playsInline
+          webkit-playsinline="true"
+          x5-playsinline="true"
           className={`w-full h-full object-contain ${!hasRemoteVideoTrack ? 'invisible absolute' : 'block'}`}
         />
 
@@ -179,6 +184,8 @@ export default function VideoCallModal() {
               ref={localVideoRef}
               autoPlay
               playsInline
+              webkit-playsinline="true"
+              x5-playsinline="true"
               muted
               className={`w-full h-full object-cover ${isCameraOff ? 'hidden' : ''}`}
             />
@@ -192,7 +199,8 @@ export default function VideoCallModal() {
       </div>
 
       {/* Control Bar */}
-      <div className="h-16 bg-[#080d17] border-t border-[#161f30] flex items-center justify-center space-x-3 px-4 z-30 shrink-0">
+      <div className="h-16 bg-[#080d17] border-t border-[#161f30] flex items-center justify-center space-x-2 sm:space-x-3 px-3 z-30 shrink-0">
+        {/* Mute Mic Button */}
         <button
           onClick={toggleMic}
           className={`p-3 rounded-full border transition ${
@@ -203,6 +211,7 @@ export default function VideoCallModal() {
           {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
 
+        {/* Camera Toggle Button */}
         {isVideoCall && (
           <button
             onClick={toggleCamera}
@@ -215,6 +224,18 @@ export default function VideoCallModal() {
           </button>
         )}
 
+        {/* Camera Flip / Switch Button (Mobile) */}
+        {isVideoCall && !isCameraOff && (
+          <button
+            onClick={switchCamera}
+            className="p-3 rounded-full border bg-[#05080f] text-zinc-300 border-[#1a263d] hover:border-[#00ff88] transition"
+            title={`Switch Camera (Currently: ${facingMode})`}
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Screen Share / Mobile Screen Cast Button */}
         <button
           onClick={toggleScreenShare}
           className={`p-3 rounded-full border transition ${
@@ -225,6 +246,7 @@ export default function VideoCallModal() {
           {isScreenSharing ? <MonitorOff className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
         </button>
 
+        {/* End Call Button */}
         <button
           onClick={endCall}
           className="p-3 bg-[#ff3366] hover:bg-[#ff1a53] text-black rounded-full font-bold transition flex items-center space-x-1"
