@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   Share2, 
@@ -6,10 +6,11 @@ import {
   Volume2, 
   VolumeX, 
   Wifi, 
-  Users,
-  Menu,
+  Menu, 
   LogOut,
-  Settings
+  Shield,
+  Film,
+  Download
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { getAvatarSvg } from '../utils/avatar';
@@ -19,24 +20,38 @@ export default function Header({
   onOpenRoomModal, 
   onOpenShareModal, 
   onOpenSettingsModal,
-  onOpenRoomSettingsModal,
+  onOpenGuildModal,
+  onOpenWatchPartyModal,
   onToggleSidebar,
   soundMuted,
-  setSoundMuted
+  setSoundMuted,
+  currentGuild
 }) {
-  const { currentRoom, roomUsers, user, leaveRoom, isHost } = useSocket();
-  const [isMobileDevice, setIsMobileDevice] = React.useState(false);
+  const { currentRoom, roomUsers, user, leaveRoom } = useSocket();
+  const [pwaDeferredPrompt, setPwaDeferredPrompt] = useState(null);
 
-  React.useEffect(() => {
-    const checkMobile = () => {
-      const isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const isSmallScreen = window.innerWidth < 768;
-      setIsMobileDevice(isMobileUA || isSmallScreen);
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setPwaDeferredPrompt(e);
     };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
+
+  const handleInstallPWA = () => {
+    if (pwaDeferredPrompt) {
+      pwaDeferredPrompt.prompt();
+      pwaDeferredPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted Vision PWA install prompt');
+        }
+        setPwaDeferredPrompt(null);
+      });
+    } else {
+      alert('To install Vision App on Mobile/Desktop:\n- Tap Share or Browser Menu (...) in Chrome/Safari\n- Select "Add to Home Screen" or "Install App".');
+    }
+  };
 
   const handleToggleMute = () => {
     const next = !soundMuted;
@@ -46,12 +61,12 @@ export default function Header({
 
   return (
     <header className="h-14 px-3 md:px-5 bg-[#05080f] border-b border-[#161f30] flex items-center justify-between z-30 shrink-0 select-none font-mono">
-      {/* Left: Branding & Current Room Info */}
+      {/* Left: Branding & Current Location Info */}
       <div className="flex items-center space-x-3 md:space-x-4 min-w-0">
         <button 
           onClick={onToggleSidebar}
-          className="md:hidden p-1.5 text-zinc-400 hover:text-emerald-400 rounded bg-[#0b101c] border border-[#161f30] transition"
-          aria-label="Toggle user list"
+          className="md:hidden p-1.5 text-zinc-400 hover:text-[#00ff88] rounded bg-[#0b101c] border border-[#161f30] transition"
+          aria-label="Toggle sidebar"
         >
           <Menu className="w-4 h-4" />
         </button>
@@ -65,66 +80,77 @@ export default function Header({
 
         <span className="text-[#1c283f] text-xs hidden sm:inline">|</span>
 
-        {/* Current Room Pill */}
+        {/* Current Location Pill */}
         <div className="flex items-center space-x-2 truncate">
           <div className="flex items-center space-x-2 bg-[#080d17] border border-[#1a263d] rounded-lg px-3 py-1 text-xs text-zinc-200">
-            {currentRoom?.hasPassword ? (
+            {currentGuild ? (
+              <Shield className="w-3.5 h-3.5 text-[#00ff88] shrink-0" />
+            ) : currentRoom?.hasPassword ? (
               <Lock className="w-3.5 h-3.5 text-[#ffb700] shrink-0" />
             ) : (
               <Wifi className="w-3.5 h-3.5 text-[#00ff88] shrink-0" />
             )}
             
-            <span className="text-zinc-400 text-xs hidden md:inline">Room:</span>
+            <span className="text-zinc-400 text-xs hidden md:inline">
+              {currentGuild ? 'Guild:' : 'Room:'}
+            </span>
             <span className="truncate max-w-[140px] sm:max-w-[200px] md:max-w-[260px] font-semibold text-white">
-              {currentRoom?.name || 'Connecting...'}
+              {currentGuild ? currentGuild.name : (currentRoom?.name || 'Connecting...')}
             </span>
 
-            {currentRoom?.hasPassword && (
+            {currentRoom?.hasPassword && !currentGuild && (
               <span className="px-1.5 py-0.2 bg-[#ffb700]/10 text-[#ffb700] border border-[#ffb700]/30 text-[10px] font-bold rounded">
                 Protected
               </span>
             )}
           </div>
 
-          {/* Leave Room Button in Header for Custom Rooms */}
-          {currentRoom?.isCustom && (
-            <button
-              onClick={leaveRoom}
-              className="flex items-center space-x-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition shadow-sm"
-              title="Leave custom room and return to Local Wi-Fi"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Leave</span>
-            </button>
-          )}
-
           <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20 rounded-lg text-xs font-bold">
             <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-pulse" />
-            <span>{roomUsers.length} Online</span>
+            <span>{currentGuild ? currentGuild.members?.length : roomUsers.length} Online</span>
           </div>
         </div>
       </div>
 
       {/* Right Controls */}
       <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
-        {/* Switch / Create Room Button */}
+        {/* Watch Party Sync Theater Button */}
         <button
-          onClick={onOpenRoomModal}
+          onClick={onOpenWatchPartyModal}
           className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
-          title="Create or Join Room"
+          title="Open Synchronized Watch Party Video Theater"
         >
-          <Plus className="w-3.5 h-3.5 text-[#00ff88]" />
-          <span className="hidden sm:inline">Room</span>
+          <Film className="w-3.5 h-3.5 text-[#00ff88]" />
+          <span className="hidden sm:inline">Watch Party</span>
+        </button>
+
+        {/* Permanent Guilds Button */}
+        <button
+          onClick={onOpenGuildModal}
+          className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
+          title="Join or Create a Permanent Guild"
+        >
+          <Shield className="w-3.5 h-3.5 text-[#00ff88]" />
+          <span className="hidden sm:inline">Guilds</span>
+        </button>
+
+        {/* PWA App Install Button */}
+        <button
+          onClick={handleInstallPWA}
+          className="p-1.5 rounded-lg bg-[#0b101c] hover:bg-[#111827] text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
+          title="Install Vision App on Mobile/Desktop"
+        >
+          <Download className="w-3.5 h-3.5" />
         </button>
 
         {/* Share Room Button */}
         <button
           onClick={onOpenShareModal}
-          className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
+          className="flex items-center space-x-1 px-2 py-1.5 text-xs font-bold rounded-lg bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
           title="Share Room / Invite Link"
         >
           <Share2 className="w-3.5 h-3.5 text-[#00ff88]" />
-          <span className="hidden sm:inline">Share</span>
+          <span className="hidden md:inline">Share</span>
         </button>
 
         {/* Audio Mute Toggle */}

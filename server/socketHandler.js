@@ -1,4 +1,5 @@
 const roomManager = require('./roomManager');
+const guildManager = require('./guildManager');
 const { getClientIp, getAutoRoomForIp } = require('./ipUtils');
 
 module.exports = function socketHandler(io) {
@@ -10,6 +11,158 @@ module.exports = function socketHandler(io) {
     socket.emit('client_ip_info', {
       ip: clientIp,
       autoRoom
+    });
+
+    /**
+     * PERMANENT GUILDS SYSTEM
+     */
+    // Create Guild
+    socket.on('create_guild', (data, callback) => {
+      try {
+        const { name, description, password, user } = data;
+        const result = guildManager.createGuild({ name, description, password, hostUser: user || { name: 'Host' } });
+        if (result.success && result.guild) {
+          socket.join(result.guild.id);
+        }
+        if (callback) callback(result);
+      } catch (err) {
+        console.error('Error creating guild:', err);
+        if (callback) callback({ success: false, error: 'Failed to create guild' });
+      }
+    });
+
+    // Join Guild By Unique ID
+    socket.on('join_guild_by_id', (data, callback) => {
+      try {
+        const { guildId, password, user } = data;
+        const result = guildManager.joinGuild({ guildId, password, user: user || { name: 'User' } });
+        if (result.success && result.guild) {
+          socket.join(result.guild.id);
+          socket.to(result.guild.id).emit('guild_user_joined', { guildId, member: result.member });
+        }
+        if (callback) callback(result);
+      } catch (err) {
+        console.error('Error joining guild:', err);
+        if (callback) callback({ success: false, error: 'Failed to join guild' });
+      }
+    });
+
+    // Get User's Joined Guilds
+    socket.on('get_my_guilds', (data, callback) => {
+      try {
+        const guildIds = data && Array.isArray(data.guildIds) ? data.guildIds : [];
+        const guilds = guildManager.getUserGuilds(guildIds);
+        guilds.forEach((g) => socket.join(g.id));
+        if (callback) callback({ success: true, guilds });
+      } catch (err) {
+        console.error('Error getting my guilds:', err);
+        if (callback) callback({ success: false, error: 'Failed to fetch guilds' });
+      }
+    });
+
+    // Send Guild Message with Custom Expiration
+    socket.on('send_guild_message', (data, callback) => {
+      try {
+        const { guildId, text, type, fileUrl, fileName, fileSize, expiryMinutes } = data;
+        const mapping = roomManager.socketMap.get(socket.id);
+        const sender = mapping ? mapping.user : (data.user || { name: 'User' });
+
+        const message = guildManager.addGuildMessage(guildId, {
+          sender,
+          text,
+          type,
+          fileUrl,
+          fileName,
+          fileSize,
+          expiryMinutes
+        });
+
+        if (message) {
+          io.to(guildId).emit('new_guild_message', { guildId, message });
+          if (callback) callback({ success: true, message });
+        } else {
+          if (callback) callback({ success: false, error: 'Failed to post guild message' });
+        }
+      } catch (err) {
+        console.error('Error sending guild message:', err);
+        if (callback) callback({ success: false, error: 'Error sending guild message' });
+      }
+    });
+
+    // Transfer Guild Host Ownership / Adminship
+    socket.on('transfer_guild_ownership', (data, callback) => {
+      try {
+        const { guildId, targetUserId } = data;
+        const mapping = roomManager.socketMap.get(socket.id);
+        const currentHostId = mapping ? (mapping.user.id || mapping.user.name) : data.currentHostId;
+
+        const result = guildManager.transferOwnership({ guildId, currentHostId, targetUserId });
+        if (result.success) {
+          io.to(guildId).emit('guild_updated', result.guild);
+        }
+        if (callback) callback(result);
+      } catch (err) {
+        console.error('Error transferring guild ownership:', err);
+        if (callback) callback({ success: false, error: 'Failed to transfer ownership' });
+      }
+    });
+
+    // Promote / Demote Guild Admin Role
+    socket.on('promote_guild_admin', (data, callback) => {
+      try {
+        const { guildId, targetUserId, newRole } = data;
+        const mapping = roomManager.socketMap.get(socket.id);
+        const requesterId = mapping ? (mapping.user.id || mapping.user.name) : data.requesterId;
+
+        const result = guildManager.promoteAdmin({ guildId, requesterId, targetUserId, newRole });
+        if (result.success) {
+          io.to(guildId).emit('guild_updated', result.guild);
+        }
+        if (callback) callback(result);
+      } catch (err) {
+        console.error('Error promoting guild admin:', err);
+        if (callback) callback({ success: false, error: 'Failed to update admin role' });
+      }
+    });
+
+    /**
+     * WATCH PARTY SYNCHRONIZED THEATER
+     */
+    socket.on('watchparty_action', ({ roomId, guildId, action, currentTime, sourceUrl }) => {
+      const target = roomId || guildId;
+      if (target) {
+        socket.to(target).emit('watchparty_sync', {
+          action, // 'play' | 'pause' | 'seek' | 'change_source'
+          currentTime,
+          sourceUrl,
+          senderSocketId: socket.id
+        });
+      }
+    });
+
+    /**
+     * WEBRTC P2P DIRECT LARGE FILE TRANSFER SIGNALING
+     */
+    socket.on('webrtc_p2p_file_offer', ({ targetSocketId, offer, fileMetadata }) => {
+      io.to(targetSocketId).emit('webrtc_p2p_file_offer', {
+        senderSocketId: socket.id,
+        offer,
+        fileMetadata
+      });
+    });
+
+    socket.on('webrtc_p2p_file_answer', ({ targetSocketId, answer }) => {
+      io.to(targetSocketId).emit('webrtc_p2p_file_answer', {
+        responderSocketId: socket.id,
+        answer
+      });
+    });
+
+    socket.on('webrtc_p2p_file_ice', ({ targetSocketId, candidate }) => {
+      io.to(targetSocketId).emit('webrtc_p2p_file_ice', {
+        senderSocketId: socket.id,
+        candidate
+      });
     });
 
     /**
@@ -37,7 +190,7 @@ module.exports = function socketHandler(io) {
           return callback && callback({ success: false, error: result.error });
         }
 
-        // Auto join the creator to this room
+        // Auto join creator to this room
         const joinRes = roomManager.addUser(socket.id, result.room.id, user || { name: 'Host' }, password);
         if (joinRes.success) {
           socket.join(result.room.id);
@@ -97,7 +250,7 @@ module.exports = function socketHandler(io) {
 
         // Attempt to find or create auto room
         let room = roomManager.rooms.get(targetRoomId);
-        if (!room && targetRoomId.startsWith('LAN-') || targetRoomId.startsWith('IP-')) {
+        if (!room && (targetRoomId.startsWith('LAN-') || targetRoomId.startsWith('IP-'))) {
           room = roomManager.getOrCreateAutoRoom({
             roomId: targetRoomId,
             roomName: autoRoom.roomName,
@@ -126,7 +279,7 @@ module.exports = function socketHandler(io) {
 
         // Leave previous socket rooms and join target room
         Array.from(socket.rooms).forEach(r => {
-          if (r !== socket.id) socket.leave(r);
+          if (r !== socket.id && !r.startsWith('GUILD-')) socket.leave(r);
         });
         socket.join(targetRoomId);
 
@@ -151,7 +304,7 @@ module.exports = function socketHandler(io) {
           users
         });
 
-        // Add a system notification message
+        // System notification
         const sysMsg = roomManager.addMessage(targetRoomId, {
           sender: { name: 'System', avatar: 'bot', color: '#6366f1' },
           text: `${joinResult.user.name} joined the room.`,
@@ -203,7 +356,6 @@ module.exports = function socketHandler(io) {
 
         if (message) {
           io.to(roomId).emit('new_message', message);
-          // Stop typing on message send
           roomManager.setTyping(roomId, mapping.user.name, false);
           io.to(roomId).emit('typing_update', Array.from(roomManager.rooms.get(roomId)?.typingUsers || []));
           if (callback) callback({ success: true, message });
@@ -241,7 +393,6 @@ module.exports = function socketHandler(io) {
     /**
      * WEBRTC AUDIO/VIDEO CALL SIGNALING
      */
-    // Initiate Call Request to a peer
     socket.on('webrtc_call_user', ({ targetSocketId, roomId, isVideo }) => {
       const mapping = roomManager.socketMap.get(socket.id);
       if (mapping) {
@@ -254,7 +405,6 @@ module.exports = function socketHandler(io) {
       }
     });
 
-    // Accept Incoming Call
     socket.on('webrtc_accept_call', ({ callerSocketId, isVideo }) => {
       const mapping = roomManager.socketMap.get(socket.id);
       if (mapping) {
@@ -266,7 +416,6 @@ module.exports = function socketHandler(io) {
       }
     });
 
-    // Reject Call
     socket.on('webrtc_reject_call', ({ callerSocketId }) => {
       const mapping = roomManager.socketMap.get(socket.id);
       io.to(callerSocketId).emit('webrtc_call_rejected', {
@@ -274,7 +423,6 @@ module.exports = function socketHandler(io) {
       });
     });
 
-    // WebRTC SDP Offer
     socket.on('webrtc_offer', ({ targetSocketId, sdp }) => {
       io.to(targetSocketId).emit('webrtc_offer', {
         callerSocketId: socket.id,
@@ -282,7 +430,6 @@ module.exports = function socketHandler(io) {
       });
     });
 
-    // WebRTC SDP Answer
     socket.on('webrtc_answer', ({ targetSocketId, sdp }) => {
       io.to(targetSocketId).emit('webrtc_answer', {
         responderSocketId: socket.id,
@@ -290,7 +437,6 @@ module.exports = function socketHandler(io) {
       });
     });
 
-    // WebRTC ICE Candidate
     socket.on('webrtc_ice_candidate', ({ targetSocketId, candidate }) => {
       io.to(targetSocketId).emit('webrtc_ice_candidate', {
         senderSocketId: socket.id,
@@ -298,7 +444,6 @@ module.exports = function socketHandler(io) {
       });
     });
 
-    // End Call
     socket.on('webrtc_end_call', ({ targetSocketId }) => {
       if (targetSocketId) {
         io.to(targetSocketId).emit('webrtc_call_ended', {
@@ -315,13 +460,11 @@ module.exports = function socketHandler(io) {
       if (removal) {
         const { roomId, user, remainingUsers } = removal;
         
-        // Notify others
         socket.to(roomId).emit('user_left', {
           user,
           users: remainingUsers
         });
 
-        // Add a system notification message
         const sysMsg = roomManager.addMessage(roomId, {
           sender: { name: 'System', avatar: 'bot', color: '#6366f1' },
           text: `${user.name} left the room.`,
@@ -329,7 +472,6 @@ module.exports = function socketHandler(io) {
         });
         io.to(roomId).emit('new_message', sysMsg);
 
-        // Also end any active call the user was in
         socket.to(roomId).emit('webrtc_call_ended', {
           senderSocketId: socket.id
         });

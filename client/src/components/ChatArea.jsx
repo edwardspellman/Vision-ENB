@@ -3,25 +3,32 @@ import {
   Wifi, 
   Lock, 
   Share2, 
-  QrCode,
-  LogIn,
-  PlusCircle,
-  User,
-  LogOut,
-  Settings,
+  PlusCircle, 
+  User, 
+  LogOut, 
+  Settings, 
   ChevronDown, 
-  Upload, 
-  MessageSquare
+  Upload,
+  Shield
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import MessageItem from './MessageItem';
 
-export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProfileModal, onOpenRoomSettingsModal, onImageClick }) {
+export default function ChatArea({ 
+  onOpenShareModal, 
+  onOpenRoomModal, 
+  onOpenProfileModal, 
+  onOpenRoomSettingsModal, 
+  onImageClick,
+  currentGuild 
+}) {
   const { currentRoom, messages, typingUsers, user, sendMessage, leaveRoom, isHost } = useSocket();
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
+
+  const activeMessages = currentGuild ? (currentGuild.messages || []) : messages;
 
   const scrollToBottom = (behavior = 'smooth') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
@@ -29,7 +36,7 @@ export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProf
 
   useEffect(() => {
     scrollToBottom('smooth');
-  }, [messages, typingUsers]);
+  }, [activeMessages, typingUsers]);
 
   const handleScroll = () => {
     if (!containerRef.current) return;
@@ -82,7 +89,7 @@ export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProf
 
   return (
     <div
-      className="flex-1 flex flex-col min-w-0 bg-[#030508] relative overflow-hidden font-mono"
+      className="flex-1 flex flex-col min-w-0 bg-[#030508] relative overflow-hidden font-mono select-none"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -102,13 +109,15 @@ export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProf
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 md:px-8 py-5 space-y-1"
       >
-        {/* Welcome Room Banner */}
+        {/* Welcome Banner */}
         <div className="max-w-xl mx-auto my-5 p-5 sm:p-6 rounded-2xl bg-[#080d17] border border-[#161f30] text-center shadow-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#00ff88]/5 rounded-full blur-2xl pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-32 h-32 bg-[#00f0ff]/5 rounded-full blur-2xl pointer-events-none" />
 
           <div className="w-11 h-11 rounded-xl bg-[#00ff88]/10 border border-[#00ff88]/30 text-[#00ff88] mx-auto flex items-center justify-center mb-3 shadow-inner">
-            {currentRoom?.hasPassword ? (
+            {currentGuild ? (
+              <Shield className="w-5 h-5 text-[#00ff88]" />
+            ) : currentRoom?.hasPassword ? (
               <Lock className="w-5 h-5 text-[#ffb700]" />
             ) : (
               <Wifi className="w-5 h-5 text-[#00ff88]" />
@@ -116,17 +125,19 @@ export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProf
           </div>
 
           <h2 className="text-base font-extrabold text-white mb-1 tracking-wide">
-            Welcome to {currentRoom?.name || 'Local Wi-Fi Network'}
+            Welcome to {currentGuild ? currentGuild.name : (currentRoom?.name || 'Local Wi-Fi Network')}
           </h2>
           
           <p className="text-xs text-zinc-400 mb-5 max-w-md mx-auto leading-relaxed">
-            {currentRoom?.isCustom 
+            {currentGuild 
+              ? `Permanent Guild Hub (${currentGuild.id}). Messages auto-expire based on host configuration.`
+              : currentRoom?.isCustom 
               ? 'This is a private room. Share the Room ID or QR code with peers to connect.'
               : 'You are connected to your local network subnet. Anyone on the same Wi-Fi joins automatically.'}
           </p>
 
           {/* Quick Action Buttons Suite */}
-          <div className={`grid gap-2.5 pt-1 border-t border-[#161f30]/80 ${currentRoom?.isCustom ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'}`}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1 border-t border-[#161f30]/80">
             {/* 1. Share */}
             <button
               onClick={onOpenShareModal}
@@ -147,12 +158,12 @@ export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProf
               <span className="truncate">Create Room</span>
             </button>
 
-            {/* 3. Setting for Host/Admin, Profile for regular users */}
+            {/* 3. Setting/Profile */}
             {isHost ? (
               <button
                 onClick={onOpenRoomSettingsModal}
                 className="flex items-center justify-center space-x-2 px-3.5 py-2 rounded-xl bg-[#00ff88]/10 hover:bg-[#00ff88]/20 border border-[#00ff88]/30 text-[#00ff88] text-xs font-bold transition-all transform active:scale-95 shadow-md group/btn"
-                title="Room Settings & Governance (Admin only)"
+                title="Room Settings & Governance"
               >
                 <Settings className="w-4 h-4 shrink-0 group-hover/btn:rotate-45 transition-transform text-[#00ff88]" />
                 <span className="truncate">Setting</span>
@@ -167,28 +178,16 @@ export default function ChatArea({ onOpenShareModal, onOpenRoomModal, onOpenProf
                 <span className="truncate">Profile</span>
               </button>
             )}
-
-            {/* 4. Leave (Shown when user joins a room to return to Local Wi-Fi Network) */}
-            {currentRoom?.isCustom && (
-              <button
-                onClick={leaveRoom}
-                className="flex items-center justify-center space-x-2 px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-bold transition-all transform active:scale-95 shadow-md group/btn"
-                title="Leave this room and return to Local Wi-Fi Network"
-              >
-                <LogOut className="w-4 h-4 shrink-0 group-hover/btn:-translate-x-0.5 transition-transform text-rose-400" />
-                <span className="truncate">Leave</span>
-              </button>
-            )}
           </div>
         </div>
 
         {/* Message Stream */}
-        {messages.map((msg) => (
+        {activeMessages.map((msg) => (
           <MessageItem key={msg.id} message={msg} onImageClick={onImageClick} />
         ))}
 
         {/* Live Typing */}
-        {typingUsers.length > 0 && (
+        {typingUsers.length > 0 && !currentGuild && (
           <div className="flex items-center space-x-2 py-1.5 text-xs text-[#00ff88] animate-pulse">
             <div className="flex space-x-1">
               <span className="w-1.5 h-1.5 bg-[#00ff88] rounded-full animate-bounce" />

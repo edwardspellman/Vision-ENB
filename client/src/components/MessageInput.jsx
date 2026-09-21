@@ -7,7 +7,6 @@ import {
   Mic, 
   Loader2, 
   X,
-  CornerDownLeft,
   Lock,
   Menu,
   Share2,
@@ -18,7 +17,9 @@ import {
   Users,
   Volume2,
   VolumeX,
-  LogOut
+  LogOut,
+  Clock,
+  Zap
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { sound } from '../utils/sound';
@@ -36,7 +37,9 @@ export default function MessageInput({
   onOpenRoomSettingsModal,
   onToggleSidebar,
   soundMuted,
-  setSoundMuted
+  setSoundMuted,
+  currentGuild,
+  onSendGuildMessage
 }) {
   const { sendMessage, setTyping, currentRoom, isHost, leaveRoom } = useSocket();
   const [text, setText] = useState('');
@@ -47,11 +50,16 @@ export default function MessageInput({
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
+  // Host/Admin Expiry Control (30m default, 60m, 1440m, 10080m, -1 for Never)
+  const [expiryMinutes, setExpiryMinutes] = useState(30);
+  const [showExpiryPicker, setShowExpiryPicker] = useState(false);
+
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const emojiPickerRef = useRef(null);
   const platformMenuRef = useRef(null);
+  const expiryPickerRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -60,6 +68,9 @@ export default function MessageInput({
       }
       if (platformMenuRef.current && !platformMenuRef.current.contains(e.target)) {
         setShowPlatformMenu(false);
+      }
+      if (expiryPickerRef.current && !expiryPickerRef.current.contains(e.target)) {
+        setShowExpiryPicker(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -98,13 +109,24 @@ export default function MessageInput({
         const data = await res.json();
 
         if (data.success) {
-          sendMessage({
-            text: text.trim(),
-            type: data.type,
-            fileUrl: data.fileUrl,
-            fileName: data.fileName,
-            fileSize: data.fileSize
-          });
+          if (currentGuild && onSendGuildMessage) {
+            onSendGuildMessage({
+              text: text.trim(),
+              type: data.type,
+              fileUrl: data.fileUrl,
+              fileName: data.fileName,
+              fileSize: data.fileSize,
+              expiryMinutes
+            });
+          } else {
+            sendMessage({
+              text: text.trim(),
+              type: data.type,
+              fileUrl: data.fileUrl,
+              fileName: data.fileName,
+              fileSize: data.fileSize
+            });
+          }
           clearFileSelection();
           setText('');
         }
@@ -119,7 +141,16 @@ export default function MessageInput({
 
     if (!text.trim()) return;
 
-    sendMessage({ text: text.trim(), type: 'text' });
+    if (currentGuild && onSendGuildMessage) {
+      onSendGuildMessage({
+        text: text.trim(),
+        type: 'text',
+        expiryMinutes
+      });
+    } else {
+      sendMessage({ text: text.trim(), type: 'text' });
+    }
+
     setText('');
     setTyping(false);
 
@@ -186,11 +217,20 @@ export default function MessageInput({
       <div className="p-3 bg-[#05080f] border-t border-[#161f30] shrink-0 font-mono">
         <VoiceRecorder
           onSendAudio={(audioData) => {
-            sendMessage({
-              ...audioData,
-              text: '',
-              type: 'audio'
-            });
+            if (currentGuild && onSendGuildMessage) {
+              onSendGuildMessage({
+                ...audioData,
+                text: '',
+                type: 'audio',
+                expiryMinutes
+              });
+            } else {
+              sendMessage({
+                ...audioData,
+                text: '',
+                type: 'audio'
+              });
+            }
             setIsRecordingVoice(false);
           }}
           onCancel={() => setIsRecordingVoice(false)}
@@ -200,7 +240,7 @@ export default function MessageInput({
   }
 
   return (
-    <div className="p-3 md:p-4 bg-[#05080f] border-t border-[#161f30] shrink-0 relative font-mono">
+    <div className="p-3 md:p-4 bg-[#05080f] border-t border-[#161f30] shrink-0 relative font-mono select-none">
       {/* File Attachment Preview */}
       {selectedFile && (
         <div className="mb-2 p-2 bg-[#080d17] border border-[#1a263d] rounded-xl flex items-center justify-between animate-fade-in">
@@ -246,222 +286,50 @@ export default function MessageInput({
         </div>
       )}
 
-      {/* Platform Functions Menu Popover */}
-      {showPlatformMenu && (
+      {/* Host/Admin Expiry Selector Popover */}
+      {showExpiryPicker && (
         <div
-          ref={platformMenuRef}
-          className="absolute bottom-full right-2 sm:right-4 mb-2 w-72 sm:w-80 bg-[#080d17]/95 backdrop-blur-md border border-[#1a263d] rounded-2xl shadow-2xl p-3 z-50 animate-fade-in font-mono select-none"
+          ref={expiryPickerRef}
+          className="absolute bottom-full right-16 mb-2 bg-[#080d17] border border-[#1a263d] rounded-xl p-2 z-50 shadow-2xl w-44 text-xs font-semibold space-y-1 animate-fade-in"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#161f30]">
-            <div className="flex items-center space-x-2">
-              <div className="w-5 h-5 rounded-md bg-[#00ff88]/10 border border-[#00ff88]/30 flex items-center justify-center">
-                <Menu className="w-3 h-3 text-[#00ff88]" />
-              </div>
-              <span className="text-xs font-bold text-white tracking-wide">Platform Functions</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowPlatformMenu(false)}
-              className="p-1 text-zinc-400 hover:text-white rounded-lg transition"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+          <div className="px-2 py-1 text-[10px] text-zinc-400 font-bold border-b border-[#161f30]">
+            Set Message Lifetime:
           </div>
-
-          {/* Quick Access List */}
-          <div className="grid grid-cols-2 gap-1.5 max-h-[320px] overflow-y-auto pr-0.5">
-            {/* Share / QR */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowPlatformMenu(false);
-                onOpenShareModal && onOpenShareModal();
-              }}
-              className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-[#00ff88]/40 text-left transition group"
-            >
-              <div className="p-1.5 rounded-lg bg-[#00ff88]/10 text-[#00ff88] group-hover:scale-110 transition-transform shrink-0">
-                <Share2 className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-zinc-200 group-hover:text-[#00ff88] truncate">Share</p>
-                <p className="text-[9px] text-zinc-500 truncate">QR & Invite</p>
-              </div>
-            </button>
-
-            {/* Create Room */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowPlatformMenu(false);
-                onOpenRoomModal && onOpenRoomModal('create');
-              }}
-              className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-[#00f0ff]/40 text-left transition group"
-            >
-              <div className="p-1.5 rounded-lg bg-[#00f0ff]/10 text-[#00f0ff] group-hover:scale-110 transition-transform shrink-0">
-                <Plus className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-zinc-200 group-hover:text-[#00f0ff] truncate">Create Room</p>
-                <p className="text-[9px] text-zinc-500 truncate">New room</p>
-              </div>
-            </button>
-
-            {/* Join Room */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowPlatformMenu(false);
-                onOpenRoomModal && onOpenRoomModal('join');
-              }}
-              className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-cyan-400/40 text-left transition group"
-            >
-              <div className="p-1.5 rounded-lg bg-cyan-400/10 text-cyan-400 group-hover:scale-110 transition-transform shrink-0">
-                <LogIn className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-zinc-200 group-hover:text-cyan-400 truncate">Join Room</p>
-                <p className="text-[9px] text-zinc-500 truncate">Enter ID</p>
-              </div>
-            </button>
-
-            {/* Room Settings (Host Only) */}
-            {isHost && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPlatformMenu(false);
-                  onOpenRoomSettingsModal && onOpenRoomSettingsModal();
-                }}
-                className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-[#00ff88]/40 text-left transition group"
-              >
-                <div className="p-1.5 rounded-lg bg-[#00ff88]/10 text-[#00ff88] group-hover:rotate-45 transition-transform shrink-0">
-                  <Settings className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-zinc-200 group-hover:text-[#00ff88] truncate">Setting</p>
-                  <p className="text-[9px] text-zinc-500 truncate">Host control</p>
-                </div>
-              </button>
-            )}
-
-            {/* Profile */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowPlatformMenu(false);
-                onOpenProfileModal && onOpenProfileModal();
-              }}
-              className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-[#00ff88]/40 text-left transition group"
-            >
-              <div className="p-1.5 rounded-lg bg-[#00ff88]/10 text-[#00ff88] group-hover:scale-110 transition-transform shrink-0">
-                <User className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-zinc-200 group-hover:text-[#00ff88] truncate">Profile</p>
-                <p className="text-[9px] text-zinc-500 truncate">Avatar & name</p>
-              </div>
-            </button>
-
-            {/* Members & Calls */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowPlatformMenu(false);
-                onToggleSidebar && onToggleSidebar();
-              }}
-              className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-violet-400/40 text-left transition group"
-            >
-              <div className="p-1.5 rounded-lg bg-violet-400/10 text-violet-400 group-hover:scale-110 transition-transform shrink-0">
-                <Users className="w-3.5 h-3.5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-zinc-200 group-hover:text-violet-400 truncate">Members</p>
-                <p className="text-[9px] text-zinc-500 truncate">Calls & users</p>
-              </div>
-            </button>
-
-            {/* Attach File */}
-            {allowFileUploads && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPlatformMenu(false);
-                  fileInputRef.current?.click();
-                }}
-                className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-emerald-400/40 text-left transition group"
-              >
-                <div className="p-1.5 rounded-lg bg-emerald-400/10 text-emerald-400 group-hover:scale-110 transition-transform shrink-0">
-                  <Paperclip className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-zinc-200 group-hover:text-emerald-400 truncate">Send File</p>
-                  <p className="text-[9px] text-zinc-500 truncate">Upload doc</p>
-                </div>
-              </button>
-            )}
-
-            {/* Voice Note */}
-            {allowVoiceNotes && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPlatformMenu(false);
-                  setIsRecordingVoice(true);
-                }}
-                className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-rose-400/40 text-left transition group"
-              >
-                <div className="p-1.5 rounded-lg bg-rose-400/10 text-rose-400 group-hover:scale-110 transition-transform shrink-0">
-                  <Mic className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-zinc-200 group-hover:text-rose-400 truncate">Voice Note</p>
-                  <p className="text-[9px] text-zinc-500 truncate">Record audio</p>
-                </div>
-              </button>
-            )}
-
-            {/* Sound FX Toggle */}
-            <button
-              type="button"
-              onClick={() => {
-                const next = !soundMuted;
-                setSoundMuted && setSoundMuted(next);
-                sound.setMuted(next);
-              }}
-              className="flex items-center space-x-2 p-2 rounded-xl bg-[#0b1220] hover:bg-[#111c33] border border-[#162238] hover:border-amber-400/40 text-left transition group"
-            >
-              <div className="p-1.5 rounded-lg bg-amber-400/10 text-amber-400 group-hover:scale-110 transition-transform shrink-0">
-                {soundMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-zinc-200 group-hover:text-amber-400 truncate">
-                  {soundMuted ? 'Unmute' : 'Mute'}
-                </p>
-                <p className="text-[9px] text-zinc-500 truncate">Sound FX</p>
-              </div>
-            </button>
-
-            {/* Leave Room (Custom Room only) */}
-            {currentRoom?.isCustom && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPlatformMenu(false);
-                  leaveRoom();
-                }}
-                className="flex items-center space-x-2 p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-left transition group"
-              >
-                <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400 group-hover:-translate-x-0.5 transition-transform shrink-0">
-                  <LogOut className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-rose-400 truncate">Leave</p>
-                  <p className="text-[9px] text-rose-500/80 truncate">Back to Wi-Fi</p>
-                </div>
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => { setExpiryMinutes(30); setShowExpiryPicker(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded-lg transition ${expiryMinutes === 30 ? 'bg-[#00ff88]/20 text-[#00ff88]' : 'text-zinc-300 hover:bg-[#111827]'}`}
+          >
+            ⏱️ 30 Minutes (Default)
+          </button>
+          <button
+            type="button"
+            onClick={() => { setExpiryMinutes(60); setShowExpiryPicker(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded-lg transition ${expiryMinutes === 60 ? 'bg-[#00ff88]/20 text-[#00ff88]' : 'text-zinc-300 hover:bg-[#111827]'}`}
+          >
+            ⌛ 1 Hour
+          </button>
+          <button
+            type="button"
+            onClick={() => { setExpiryMinutes(1440); setShowExpiryPicker(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded-lg transition ${expiryMinutes === 1440 ? 'bg-[#00ff88]/20 text-[#00ff88]' : 'text-zinc-300 hover:bg-[#111827]'}`}
+          >
+            📅 24 Hours
+          </button>
+          <button
+            type="button"
+            onClick={() => { setExpiryMinutes(10080); setShowExpiryPicker(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded-lg transition ${expiryMinutes === 10080 ? 'bg-[#00ff88]/20 text-[#00ff88]' : 'text-zinc-300 hover:bg-[#111827]'}`}
+          >
+            🗓️ 7 Days
+          </button>
+          <button
+            type="button"
+            onClick={() => { setExpiryMinutes(-1); setShowExpiryPicker(false); }}
+            className={`w-full text-left px-2 py-1.5 rounded-lg transition ${expiryMinutes === -1 ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-300 hover:bg-[#111827]'}`}
+          >
+            📌 Permanent / Never
+          </button>
         </div>
       )}
 
@@ -506,27 +374,28 @@ export default function MessageInput({
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Type a message or paste a code snippet..."
+            placeholder={currentGuild ? `Message ${currentGuild.name}...` : "Type a message or paste code..."}
             className="w-full bg-transparent text-zinc-100 placeholder-zinc-500 text-xs focus:outline-none resize-none max-h-24 overflow-y-auto font-mono"
           />
         </div>
 
         {/* Action Controls (Right) */}
         <div className="flex items-center space-x-1 pb-1">
-          {/* Small Bar Icon on bottom side of mic button to access every function of platform */}
-          <button
-            type="button"
-            onClick={() => setShowPlatformMenu(!showPlatformMenu)}
-            className={`p-2 rounded-xl border transition ${
-              showPlatformMenu
-                ? 'bg-[#00ff88]/20 border-[#00ff88] text-[#00ff88]'
-                : 'bg-[#080d17] border-[#161f30] text-zinc-400 hover:text-[#00ff88] hover:border-[#00ff88]/40'
-            }`}
-            title="All Platform Functions"
-            aria-label="Platform functions menu"
-          >
-            <Menu className="w-4 h-4" />
-          </button>
+          {/* Host/Admin Expiry Selector Button */}
+          {isHost && (
+            <button
+              type="button"
+              onClick={() => setShowExpiryPicker(!showExpiryPicker)}
+              className={`p-2 rounded-xl border transition ${
+                expiryMinutes === -1 
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' 
+                  : 'bg-[#080d17] border-[#161f30] text-zinc-400 hover:text-[#00ff88]'
+              }`}
+              title={`Message Expiry: ${expiryMinutes === -1 ? 'Never / Pinned' : expiryMinutes + 'm'}`}
+            >
+              <Clock className="w-4 h-4" />
+            </button>
+          )}
 
           {!text.trim() && !selectedFile ? (
             allowVoiceNotes && (

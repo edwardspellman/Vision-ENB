@@ -24,6 +24,9 @@ export function WebRTCProvider({ children }) {
   const [remoteStream, setRemoteStream] = useState(null);
   const [localStream, setLocalStream] = useState(null);
 
+  // P2P Large File Transfer State
+  const [p2pTransfer, setP2pTransfer] = useState(null); // { fileName, fileSize, progress, status, speedMBs, isSender }
+
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const peerConnectionRef = useRef(null);
@@ -33,6 +36,12 @@ export function WebRTCProvider({ children }) {
   const pendingIceCandidatesRef = useRef([]);
   const wasVoiceCallRef = useRef(false);
 
+  // P2P DataChannel Refs
+  const p2pPeerRef = useRef(null);
+  const dataChannelRef = useRef(null);
+  const receivedChunksRef = useRef([]);
+  const receivedSizeRef = useRef(0);
+
   // Setup WebRTC socket listeners
   useEffect(() => {
     if (!socket) return;
@@ -40,7 +49,6 @@ export function WebRTCProvider({ children }) {
     // Incoming call
     socket.on('webrtc_incoming_call', ({ callerSocketId, callerUser, isVideo }) => {
       if (callState !== 'idle') {
-        // Automatically reject with busy state if already in a call
         socket.emit('webrtc_reject_call', { callerSocketId });
         return;
       }
@@ -56,7 +64,6 @@ export function WebRTCProvider({ children }) {
       setRemoteUser(responderUser);
       setCallState('connected');
       
-      // Create and send SDP Offer
       try {
         const pc = createPeerConnection(responderSocketId);
         const offer = await pc.createOffer();
@@ -73,7 +80,7 @@ export function WebRTCProvider({ children }) {
       cleanupCall();
     });
 
-    // SDP Offer Received (Supports initial offer + renegotiation for mobile screen casting)
+    // SDP Offer Received
     socket.on('webrtc_offer', async ({ callerSocketId, sdp }) => {
       try {
         let pc = peerConnectionRef.current;
@@ -82,7 +89,6 @@ export function WebRTCProvider({ children }) {
         }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
-        // Flush any queued ICE candidates
         while (pendingIceCandidatesRef.current.length > 0) {
           const cand = pendingIceCandidatesRef.current.shift();
           await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.warn('ICE add error:', e));
@@ -103,7 +109,6 @@ export function WebRTCProvider({ children }) {
         if (pc && pc.signalingState !== 'closed') {
           await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
-          // Flush queued ICE candidates
           while (pendingIceCandidatesRef.current.length > 0) {
             const cand = pendingIceCandidatesRef.current.shift();
             await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.warn('ICE add error:', e));
@@ -135,6 +140,92 @@ export function WebRTCProvider({ children }) {
       cleanupCall();
     });
 
+    /**
+     * WEBRTC P2P DIRECT LARGE FILE TRANSFER SOCKET LISTENERS
+     */
+    socket.on('webrtc_p2p_file_offer', async ({ senderSocketId, offer, fileMetadata }) => {
+      try {
+        setP2pTransfer({
+          fileName: fileMetadata.fileName,
+          fileSize: fileMetadata.fileSize,
+          progress: 0,
+          status: 'Receiving P2P Stream...',
+          isSender: false
+        });
+
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        p2pPeerRef.current = pc;
+        receivedChunksRef.current = [];
+        receivedSizeRef.current = 0;
+
+        pc.ondatachannel = (event) => {
+          const dc = event.channel;
+          dc.binaryType = 'arraybuffer';
+          dataChannelRef.current = dc;
+
+          dc.onmessage = (msgEvent) => {
+            receivedChunksRef.current.push(msgEvent.data);
+            receivedSizeRef.current += msgEvent.data.byteLength;
+            const progress = Math.min(100, Math.round((receivedSizeRef.current / fileMetadata.fileSize) * 100));
+
+            setP2pTransfer((prev) => prev ? {
+              ...prev,
+              progress,
+              status: progress === 100 ? 'Transfer Complete!' : `Receiving... ${progress}%`
+            } : null);
+
+            if (receivedSizeRef.current >= fileMetadata.fileSize) {
+              // Assemble blob and download
+              const blob = new Blob(receivedChunksRef.current);
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = fileMetadata.fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+
+              setTimeout(() => setP2pTransfer(null), 4000);
+            }
+          };
+        };
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            socket.emit('webrtc_p2p_file_ice', { targetSocketId: senderSocketId, candidate: e.candidate });
+          }
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit('webrtc_p2p_file_answer', { targetSocketId: senderSocketId, answer });
+      } catch (err) {
+        console.error('Failed receiving P2P file offer:', err);
+      }
+    });
+
+    socket.on('webrtc_p2p_file_answer', async ({ responderSocketId, answer }) => {
+      try {
+        if (p2pPeerRef.current) {
+          await p2pPeerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+      } catch (err) {
+        console.error('Failed setting P2P file answer:', err);
+      }
+    });
+
+    socket.on('webrtc_p2p_file_ice', async ({ senderSocketId, candidate }) => {
+      try {
+        if (p2pPeerRef.current && candidate) {
+          await p2pPeerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      } catch (err) {
+        console.error('Failed adding P2P file ICE candidate:', err);
+      }
+    });
+
     return () => {
       socket.off('webrtc_incoming_call');
       socket.off('webrtc_call_accepted');
@@ -143,6 +234,9 @@ export function WebRTCProvider({ children }) {
       socket.off('webrtc_answer');
       socket.off('webrtc_ice_candidate');
       socket.off('webrtc_call_ended');
+      socket.off('webrtc_p2p_file_offer');
+      socket.off('webrtc_p2p_file_answer');
+      socket.off('webrtc_p2p_file_ice');
     };
   }, [socket, callState]);
 
@@ -158,14 +252,12 @@ export function WebRTCProvider({ children }) {
     peerConnectionRef.current = pc;
     pendingIceCandidatesRef.current = [];
 
-    // Add local tracks to peer connection
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current);
       });
     }
 
-    // Handle incoming remote track
     pc.ontrack = (event) => {
       if (event.streams && event.streams[0]) {
         setRemoteStream(event.streams[0]);
@@ -175,7 +267,6 @@ export function WebRTCProvider({ children }) {
       }
     };
 
-    // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && socket) {
         socket.emit('webrtc_ice_candidate', {
@@ -186,6 +277,85 @@ export function WebRTCProvider({ children }) {
     };
 
     return pc;
+  };
+
+  /**
+   * Send a file P2P via WebRTC DataChannel (Unlimited MB file transfer with 0 server storage load)
+   */
+  const sendP2PFile = async (targetSocketId, file) => {
+    if (!socket || !targetSocketId || !file) return;
+
+    try {
+      setP2pTransfer({
+        fileName: file.name,
+        fileSize: file.size,
+        progress: 0,
+        status: 'Connecting P2P DataChannel...',
+        isSender: true
+      });
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      p2pPeerRef.current = pc;
+
+      const dc = pc.createDataChannel('fileTransfer');
+      dc.binaryType = 'arraybuffer';
+      dataChannelRef.current = dc;
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit('webrtc_p2p_file_ice', { targetSocketId, candidate: e.candidate });
+        }
+      };
+
+      dc.onopen = async () => {
+        const chunkSize = 16384; // 16KB chunks
+        const fileReader = new FileReader();
+        let offset = 0;
+
+        const readSlice = (o) => {
+          const slice = file.slice(o, o + chunkSize);
+          fileReader.readAsArrayBuffer(slice);
+        };
+
+        fileReader.onload = (e) => {
+          dc.send(e.target.result);
+          offset += e.target.result.byteLength;
+          const progress = Math.min(100, Math.round((offset / file.size) * 100));
+
+          setP2pTransfer((prev) => prev ? {
+            ...prev,
+            progress,
+            status: progress === 100 ? 'File Sent Successfully!' : `Sending... ${progress}%`
+          } : null);
+
+          if (offset < file.size) {
+            // Respect bufferedAmount to prevent buffer overflow
+            if (dc.bufferedAmount > 65536) {
+              setTimeout(() => readSlice(offset), 50);
+            } else {
+              readSlice(offset);
+            }
+          } else {
+            setTimeout(() => setP2pTransfer(null), 4000);
+          }
+        };
+
+        readSlice(0);
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      socket.emit('webrtc_p2p_file_offer', {
+        targetSocketId,
+        offer,
+        fileMetadata: { fileName: file.name, fileSize: file.size }
+      });
+    } catch (err) {
+      console.error('Error sending P2P file:', err);
+      alert('Failed to initiate P2P file transfer.');
+      setP2pTransfer(null);
+    }
   };
 
   /**
@@ -395,7 +565,6 @@ export function WebRTCProvider({ children }) {
       try {
         let screenStream = null;
 
-        // 1. Mobile & Desktop displayMedia screen capture (No desktop-only constraints)
         if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
           try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({
@@ -412,7 +581,6 @@ export function WebRTCProvider({ children }) {
           }
         }
 
-        // 2. Mobile WebView / Camera Cast Fallback: If getDisplayMedia is unsupported or denied by OS, fallback to rear camera environment cast
         if (!screenStream) {
           try {
             screenStream = await navigator.mediaDevices.getUserMedia({
@@ -433,17 +601,14 @@ export function WebRTCProvider({ children }) {
           throw new Error('No video track found for screen share.');
         }
 
-        // Attach track to Peer Connection
         const senders = peerConnectionRef.current.getSenders();
         const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
 
         if (videoSender) {
           await videoSender.replaceTrack(screenTrack);
         } else {
-          // Voice Call Fix: Add video track dynamically to peer connection
           peerConnectionRef.current.addTrack(screenTrack, screenStream);
 
-          // Trigger SDP offer renegotiation so recipient receives screen stream
           if (socket && activePeerSocketId.current) {
             const offer = await peerConnectionRef.current.createOffer();
             await peerConnectionRef.current.setLocalDescription(offer);
@@ -465,7 +630,7 @@ export function WebRTCProvider({ children }) {
         setIsVideoCall(true);
         setIsScreenSharing(true);
       } catch (err) {
-        console.error('Screen sharing / mobile cast error:', err);
+        console.error('Screen sharing error:', err);
         alert(err.message || 'Screen sharing is unavailable on this device.');
       }
     } else {
@@ -506,7 +671,6 @@ export function WebRTCProvider({ children }) {
 
     setIsScreenSharing(false);
 
-    // Send updated SDP offer to peer so screen cast stops on remote side
     if (socket && activePeerSocketId.current) {
       try {
         const offer = await peerConnectionRef.current.createOffer();
@@ -534,6 +698,7 @@ export function WebRTCProvider({ children }) {
         facingMode,
         remoteStream,
         localStream,
+        p2pTransfer,
         localVideoRef,
         remoteVideoRef,
         startCall,
@@ -543,7 +708,8 @@ export function WebRTCProvider({ children }) {
         toggleMic,
         toggleCamera,
         switchCamera,
-        toggleScreenShare
+        toggleScreenShare,
+        sendP2PFile
       }}
     >
       {children}
