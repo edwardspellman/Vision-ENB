@@ -219,10 +219,20 @@ class RoomManager {
 
     this.removeUser(socketId);
 
+    // Remove any existing stale socket in this room for the same user ID or name
+    const targetUserId = user.id || socketId;
+    const targetUserName = user.name;
+    for (const [existingSocketId, existingUser] of room.users.entries()) {
+      if (existingSocketId !== socketId && (existingUser.id === targetUserId || (targetUserName && existingUser.name === targetUserName))) {
+        room.users.delete(existingSocketId);
+        this.socketMap.delete(existingSocketId);
+      }
+    }
+
     const userData = {
       socketId,
       id: user.id || socketId,
-      name: user.name || 'Anonymous',
+      name: user.name || 'Operative',
       avatar: user.avatar || user.name || 'avatar',
       color: user.color || '#3b82f6',
       device: user.device || 'desktop',
@@ -299,6 +309,34 @@ class RoomManager {
   }
 
   /**
+   * Toggle Pin Message in Room (Host only)
+   */
+  togglePinMessage(socketId, roomId, messageId) {
+    const room = this.rooms.get(roomId);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const mapping = this.socketMap.get(socketId);
+    const isHost = (room.hostId && mapping && mapping.user.id === room.hostId) || room.users.get(socketId)?.isHost;
+    if (!isHost) {
+      return { success: false, error: 'Only the room host can pin messages.' };
+    }
+
+    const msg = room.messages.find(m => m.id === messageId);
+    if (!msg) return { success: false, error: 'Message not found' };
+
+    msg.isPinned = !msg.isPinned;
+    msg.pinnedBy = msg.isPinned ? (mapping?.user?.name || 'Host') : null;
+
+    return {
+      success: true,
+      messageId,
+      isPinned: msg.isPinned,
+      pinnedBy: msg.pinnedBy,
+      room: this.getRoomPublicInfo(roomId)
+    };
+  }
+
+  /**
    * Add or toggle emoji reaction
    */
   toggleReaction(roomId, messageId, emoji, userName) {
@@ -347,7 +385,15 @@ class RoomManager {
   getUsers(roomId) {
     const room = this.rooms.get(roomId);
     if (!room) return [];
-    return Array.from(room.users.values());
+    
+    const uniqueUsersMap = new Map();
+    for (const u of room.users.values()) {
+      const key = u.id || u.name;
+      if (!uniqueUsersMap.has(key)) {
+        uniqueUsersMap.set(key, u);
+      }
+    }
+    return Array.from(uniqueUsersMap.values());
   }
 
   /**

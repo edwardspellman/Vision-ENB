@@ -24,8 +24,7 @@ const storage = multer.diskStorage({
 });
 
 const BLOCKED_EXTENSIONS = new Set([
-  '.exe', '.bat', '.cmd', '.sh', '.ps1', '.vbs', '.js', '.mjs',
-  '.html', '.htm', '.php', '.phtml', '.shtml', '.hta', '.jar', '.jsp', '.asp', '.aspx'
+  '.exe', '.bat', '.cmd', '.vbs', '.phtml', '.hta', '.jar', '.jsp', '.asp', '.aspx'
 ]);
 
 // Max 50MB per file with security fileFilter

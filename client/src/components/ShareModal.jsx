@@ -7,24 +7,44 @@ import {
   Lock, 
   QrCode, 
   Share2, 
-  ExternalLink 
+  ExternalLink
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 
 export default function ShareModal({ isOpen, onClose }) {
-  const { currentRoom } = useSocket();
+  const { currentRoom, ipInfo } = useSocket();
+
+  // Resolve share origin: if on localhost/127.0.0.1, use LAN IP so mobile QR code scanning works on local Wi-Fi
+  const getShareOrigin = () => {
+    const origin = window.location.origin;
+    const hostname = window.location.hostname;
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && ipInfo?.lanIp && ipInfo.lanIp !== '127.0.0.1') {
+      const port = window.location.port ? `:${window.location.port}` : '';
+      return `${window.location.protocol}//${ipInfo.lanIp}${port}`;
+    }
+    return origin;
+  };
+
+  const shareOrigin = getShareOrigin();
+
+  const target = currentRoom ? {
+    id: currentRoom.id,
+    name: currentRoom.name,
+    password: currentRoom.password || '',
+    hasPassword: !!currentRoom.hasPassword,
+    url: `${shareOrigin}/#room=${encodeURIComponent(currentRoom.id)}`
+  } : null;
+
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
   const canvasRef = useRef(null);
 
-  const roomUrl = `${window.location.origin}/#room=${encodeURIComponent(currentRoom?.id || '')}`;
-
   useEffect(() => {
-    if (isOpen && currentRoom && canvasRef.current) {
+    if (isOpen && target && canvasRef.current) {
       QRCode.toCanvas(
         canvasRef.current,
-        roomUrl,
+        target.url,
         {
           width: 180,
           margin: 1,
@@ -38,28 +58,27 @@ export default function ShareModal({ isOpen, onClose }) {
         }
       );
     }
-  }, [isOpen, currentRoom, roomUrl]);
+  }, [isOpen, target]);
 
-  if (!isOpen || !currentRoom) return null;
+  if (!isOpen || !target) return null;
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(roomUrl);
+    navigator.clipboard.writeText(target.url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
   const handleCopyId = () => {
-    navigator.clipboard.writeText(currentRoom.id);
+    navigator.clipboard.writeText(target.id);
     setCopiedId(true);
     setTimeout(() => setCopiedId(false), 2000);
   };
 
   const handleCopyAll = () => {
-    let textToCopy = `Join my room on Vision!\nRoom ID: ${currentRoom.id}`;
-    if (currentRoom.hasPassword) {
-      textToCopy += `\nPassword: (Shared privately)`;
-    }
-    textToCopy += `\nLink: ${roomUrl}`;
+    const textToCopy = `⚡ VISION ROOM INVITE\n` +
+      `• Room ID: ${target.id}\n` +
+      `• Password: ${target.hasPassword ? 'Protected' : 'Public'}\n` +
+      `• Direct Join Link: ${target.url}`;
 
     navigator.clipboard.writeText(textToCopy);
     setCopiedAll(true);
@@ -90,12 +109,12 @@ export default function ShareModal({ isOpen, onClose }) {
         <div className="p-6 space-y-4">
           {/* QR Code Frame */}
           <div className="flex flex-col items-center justify-center p-4 bg-[#05080f] rounded-xl border border-[#161f30]">
-            <div className="p-2 bg-[#00ff88] rounded-lg shadow-lg mb-2">
+            <div className="p-2 rounded-lg shadow-lg mb-2 bg-[#00ff88]">
               <canvas ref={canvasRef} className="rounded" />
             </div>
             <p className="text-xs text-zinc-400 flex items-center space-x-1 font-medium">
               <QrCode className="w-3.5 h-3.5 text-[#00ff88]" />
-              <span>Scan with mobile phone to join instantly</span>
+              <span>Scan with mobile phone to join room instantly</span>
             </p>
           </div>
 
@@ -114,15 +133,15 @@ export default function ShareModal({ isOpen, onClose }) {
               </button>
             </div>
             <p className="text-base font-bold text-[#00f0ff] tracking-wider">
-              {currentRoom.id}
+              {target.id}
             </p>
           </div>
 
           {/* Password Notice */}
-          {currentRoom.hasPassword && (
+          {target.hasPassword && (
             <div className="p-3 bg-[#ffb700]/10 border border-[#ffb700]/30 rounded-xl text-xs text-[#ffb700] flex items-center space-x-2.5">
               <Lock className="w-4 h-4 shrink-0" />
-              <span>This room is password-protected. Share the password with friends so they can enter.</span>
+              <span>This room is password-protected. Share the password with members so they can enter.</span>
             </div>
           )}
 
@@ -141,7 +160,7 @@ export default function ShareModal({ isOpen, onClose }) {
               className="py-2.5 px-3 bg-[#00ff88] hover:bg-[#00e67a] text-black font-bold text-xs rounded-xl transition shadow-lg flex items-center justify-center space-x-1.5"
             >
               {copiedAll ? <Check className="w-3.5 h-3.5 text-black" /> : <Copy className="w-3.5 h-3.5 text-black" />}
-              <span>{copiedAll ? 'Details Copied!' : 'Copy Invite Info'}</span>
+              <span>{copiedAll ? 'Details Copied!' : 'Copy Details'}</span>
             </button>
           </div>
         </div>

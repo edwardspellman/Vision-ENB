@@ -9,6 +9,7 @@ client/dist/
 # Uploads & temporary media
 server/uploads/
 uploads/
+server/data/
 
 # Logs & Environment variables
 *.log

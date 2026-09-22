@@ -5,13 +5,13 @@ import {
   Share2, 
   PlusCircle, 
   User, 
-  LogOut, 
   Settings, 
   ChevronDown, 
   Upload,
-  Shield
+  Menu
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
+import { getBackendUrl } from '../utils/config';
 import MessageItem from './MessageItem';
 
 export default function ChatArea({ 
@@ -20,15 +20,14 @@ export default function ChatArea({
   onOpenProfileModal, 
   onOpenRoomSettingsModal, 
   onImageClick,
-  currentGuild 
+  onToggleSidebar
 }) {
-  const { currentRoom, messages, typingUsers, user, sendMessage, leaveRoom, isHost } = useSocket();
+  const { currentRoom, messages, typingUsers, sendMessage, isHost } = useSocket();
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
-
-  const activeMessages = currentGuild ? (currentGuild.messages || []) : messages;
 
   const scrollToBottom = (behavior = 'smooth') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
@@ -36,7 +35,7 @@ export default function ChatArea({
 
   useEffect(() => {
     scrollToBottom('smooth');
-  }, [activeMessages, typingUsers]);
+  }, [messages, typingUsers]);
 
   const handleScroll = () => {
     if (!containerRef.current) return;
@@ -66,7 +65,7 @@ export default function ChatArea({
       formData.append('file', file);
 
       try {
-        const res = await fetch('/api/upload', {
+        const res = await fetch(`${getBackendUrl()}/api/upload`, {
           method: 'POST',
           body: formData
         });
@@ -115,9 +114,7 @@ export default function ChatArea({
           <div className="absolute bottom-0 left-0 w-32 h-32 bg-[#00f0ff]/5 rounded-full blur-2xl pointer-events-none" />
 
           <div className="w-11 h-11 rounded-xl bg-[#00ff88]/10 border border-[#00ff88]/30 text-[#00ff88] mx-auto flex items-center justify-center mb-3 shadow-inner">
-            {currentGuild ? (
-              <Shield className="w-5 h-5 text-[#00ff88]" />
-            ) : currentRoom?.hasPassword ? (
+            {currentRoom?.hasPassword ? (
               <Lock className="w-5 h-5 text-[#ffb700]" />
             ) : (
               <Wifi className="w-5 h-5 text-[#00ff88]" />
@@ -125,19 +122,17 @@ export default function ChatArea({
           </div>
 
           <h2 className="text-base font-extrabold text-white mb-1 tracking-wide">
-            Welcome to {currentGuild ? currentGuild.name : (currentRoom?.name || 'Local Wi-Fi Network')}
+            Welcome to {currentRoom?.isCustom ? currentRoom.name : 'Local Network'}
           </h2>
           
-          <p className="text-xs text-zinc-400 mb-5 max-w-md mx-auto leading-relaxed">
-            {currentGuild 
-              ? `Permanent Guild Hub (${currentGuild.id}). Messages auto-expire based on host configuration.`
-              : currentRoom?.isCustom 
+          <p className="text-xs text-zinc-400 mb-4 max-w-md mx-auto leading-relaxed">
+            {currentRoom?.isCustom 
               ? 'This is a private room. Share the Room ID or QR code with peers to connect.'
               : 'You are connected to your local network subnet. Anyone on the same Wi-Fi joins automatically.'}
           </p>
 
           {/* Quick Action Buttons Suite */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1 border-t border-[#161f30]/80">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 pt-3 border-t border-[#161f30]/80">
             {/* 1. Share */}
             <button
               onClick={onOpenShareModal}
@@ -158,7 +153,17 @@ export default function ChatArea({
               <span className="truncate">Create Room</span>
             </button>
 
-            {/* 3. Setting/Profile */}
+            {/* 3. Menu (Mobile Android & iOS Only) */}
+            <button
+              onClick={onToggleSidebar}
+              className="md:hidden flex items-center justify-center space-x-2 px-3.5 py-2 rounded-xl bg-[#00f0ff]/10 hover:bg-[#00f0ff]/20 border border-[#00f0ff]/30 text-[#00f0ff] text-xs font-bold transition-all transform active:scale-95 shadow-md group/btn"
+              title="Open Navigation & Member Menu"
+            >
+              <Menu className="w-4 h-4 shrink-0 group-hover/btn:scale-110 transition-transform text-[#00f0ff]" />
+              <span className="truncate">Menu</span>
+            </button>
+
+            {/* 4. Setting/Profile */}
             {isHost ? (
               <button
                 onClick={onOpenRoomSettingsModal}
@@ -182,12 +187,16 @@ export default function ChatArea({
         </div>
 
         {/* Message Stream */}
-        {activeMessages.map((msg) => (
-          <MessageItem key={msg.id} message={msg} onImageClick={onImageClick} />
+        {messages.map((msg) => (
+          <MessageItem
+            key={msg.id}
+            message={msg}
+            onImageClick={onImageClick}
+          />
         ))}
 
         {/* Live Typing */}
-        {typingUsers.length > 0 && !currentGuild && (
+        {typingUsers.length > 0 && (
           <div className="flex items-center space-x-2 py-1.5 text-xs text-[#00ff88] animate-pulse">
             <div className="flex space-x-1">
               <span className="w-1.5 h-1.5 bg-[#00ff88] rounded-full animate-bounce" />

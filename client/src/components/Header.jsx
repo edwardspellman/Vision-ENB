@@ -2,13 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   Share2, 
-  Plus, 
   Volume2, 
   VolumeX, 
   Wifi, 
   Menu, 
-  Shield,
-  Film,
   Download
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
@@ -19,14 +16,11 @@ export default function Header({
   onOpenRoomModal, 
   onOpenShareModal, 
   onOpenSettingsModal,
-  onOpenGuildModal,
-  onOpenWatchPartyModal,
   onToggleSidebar,
   soundMuted,
-  setSoundMuted,
-  currentGuild
+  setSoundMuted
 }) {
-  const { currentRoom, roomUsers, user } = useSocket();
+  const { currentRoom, roomUsers, user, ipInfo } = useSocket();
   const [pwaDeferredPrompt, setPwaDeferredPrompt] = useState(null);
 
   useEffect(() => {
@@ -59,7 +53,7 @@ export default function Header({
   };
 
   return (
-    <header className="h-14 px-3 md:px-5 bg-[#05080f] border-b border-[#161f30] flex items-center justify-between z-30 shrink-0 select-none font-mono">
+    <header className="min-h-[3.5rem] pt-[env(safe-area-inset-top,0px)] pb-1 px-3 md:px-5 bg-[#05080f] border-b border-[#161f30] flex items-center justify-between z-30 shrink-0 select-none font-mono transition-all">
       {/* Left: Branding & Clean Location Info */}
       <div className="flex items-center space-x-2.5 md:space-x-4 min-w-0">
         {/* Logo */}
@@ -69,64 +63,48 @@ export default function Header({
           </span>
         </div>
 
-        <span className="text-[#1c283f] text-xs">|</span>
+        <span className="hidden sm:inline text-[#1c283f] text-xs">|</span>
 
         {/* Current Location Pill */}
-        <div className="flex items-center space-x-2 truncate">
+        <div className="hidden sm:flex items-center space-x-2 truncate">
           <div className="flex items-center space-x-2 bg-[#080d17] border border-[#1a263d] rounded-xl px-2.5 sm:px-3 py-1 text-xs text-zinc-200">
-            {currentGuild ? (
-              <Shield className="w-3.5 h-3.5 text-[#00ff88] shrink-0" />
-            ) : currentRoom?.hasPassword ? (
+            {currentRoom?.hasPassword ? (
               <Lock className="w-3.5 h-3.5 text-[#ffb700] shrink-0" />
             ) : (
               <Wifi className="w-3.5 h-3.5 text-[#00ff88] shrink-0" />
             )}
             
-            <span className="text-zinc-400 text-xs hidden sm:inline">
-              {currentGuild ? 'Guild:' : 'Room:'}
-            </span>
+            {currentRoom?.isCustom && (
+              <span className="text-zinc-400 text-xs hidden sm:inline">Room:</span>
+            )}
             <span className="truncate max-w-[120px] sm:max-w-[200px] md:max-w-[260px] font-semibold text-white">
-              {currentGuild ? currentGuild.name : (currentRoom?.name || 'Connecting...')}
+              {currentRoom?.isCustom ? currentRoom.name : 'Welcome to Local Network'}
             </span>
 
-            {currentRoom?.hasPassword && !currentGuild && (
+            {currentRoom?.hasPassword && (
               <span className="px-1.5 py-0.2 bg-[#ffb700]/10 text-[#ffb700] border border-[#ffb700]/30 text-[10px] font-bold rounded hidden sm:inline">
                 Protected
               </span>
             )}
           </div>
 
+          {/* Local IP Address Pill */}
+          <div className="hidden xl:flex items-center space-x-1.5 px-2.5 py-1 bg-[#080d17] border border-[#1a263d] rounded-xl text-xs font-bold text-[#00ff88]">
+            <span className="text-zinc-400">IP:</span>
+            <span>{ipInfo?.lanIp || ipInfo?.rawIp || ipInfo?.ip || '127.0.0.1'}</span>
+          </div>
+
           <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20 rounded-xl text-xs font-bold">
             <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-pulse" />
-            <span>{currentGuild ? currentGuild.members?.length : roomUsers.length} Online</span>
+            <span>{roomUsers.length} Online</span>
           </div>
         </div>
       </div>
 
       {/* Right Controls */}
       <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
-        {/* Desktop Quick Action Buttons (Hidden on Mobile for clean top bar) */}
+        {/* Desktop Quick Action Buttons */}
         <div className="hidden md:flex items-center space-x-1.5">
-          {/* Watch Party Sync Theater Button */}
-          <button
-            onClick={onOpenWatchPartyModal}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-xl bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
-            title="Open Synchronized Watch Party Video Theater"
-          >
-            <Film className="w-3.5 h-3.5 text-[#00ff88]" />
-            <span>Watch Party</span>
-          </button>
-
-          {/* Permanent Guilds Button */}
-          <button
-            onClick={onOpenGuildModal}
-            className="flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-xl bg-[#0b101c] hover:bg-[#111827] text-zinc-200 hover:text-[#00ff88] border border-[#1a263d] hover:border-[#00ff88]/40 transition"
-            title="Join or Create a Permanent Guild"
-          >
-            <Shield className="w-3.5 h-3.5 text-[#00ff88]" />
-            <span>Guilds</span>
-          </button>
-
           {/* PWA App Install Button */}
           <button
             onClick={handleInstallPWA}
@@ -174,7 +152,7 @@ export default function Header({
           </button>
         </div>
 
-        {/* Mobile Sidebar Menu Button (Top Right Header Position) */}
+        {/* Mobile Sidebar Menu Button */}
         <button 
           onClick={onToggleSidebar}
           className="px-3 py-1.5 rounded-xl bg-[#00ff88]/10 hover:bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30 font-bold text-xs flex items-center space-x-1.5 shadow-md transition transform active:scale-95"

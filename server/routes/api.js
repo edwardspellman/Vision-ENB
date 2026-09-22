@@ -1,17 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const roomManager = require('../roomManager');
-const { getClientIp, getAutoRoomForIp, maskIp } = require('../ipUtils');
+const { getClientIp, getAutoRoomForIp, maskIp, getServerLanIp } = require('../ipUtils');
 
 // GET client IP & network details
 router.get('/ip', (req, res) => {
   const ip = getClientIp(req);
   const autoRoom = getAutoRoomForIp(ip);
   const masked = maskIp(ip);
+  const lanIp = getServerLanIp();
 
   res.json({
     ip: masked,
     rawIp: ip,
+    lanIp,
+    serverLanUrl: `http://${lanIp}:3000`,
     autoRoom,
     serverTime: Date.now()
   });

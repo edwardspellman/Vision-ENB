@@ -1,4 +1,23 @@
 const crypto = require('crypto');
+const os = require('os');
+
+/**
+ * Get machine's primary local LAN IPv4 address (e.g. 192.168.1.100 or 10.77.202.165)
+ */
+function getServerLanIp() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name]) {
+      // Skip over internal and non-IPv4 addresses
+      if (net.family === 'IPv4' && !net.internal) {
+        if (isPrivateIp(net.address) && net.address !== '127.0.0.1') {
+          return net.address;
+        }
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 
 /**
  * Normalizes and extracts client IP address from Express Request or Socket handshake
@@ -58,36 +77,32 @@ function isPrivateIp(ip) {
 }
 
 /**
- * Generates an automatic room ID based on the IP address.
- * People on the same public IP or local subnet are grouped together.
+ * Generates an automatic room ID formatted like IP-XZ76-56FX (random 4-character alphanumeric blocks).
+ * People on the same public IP or local network are grouped together.
  */
 function getAutoRoomForIp(ip) {
   const isLocal = isPrivateIp(ip);
 
+  // Use local server LAN IP for local network, or public IP for WAN
+  const seedIp = isLocal ? getServerLanIp() : ip;
+  const hash = crypto.createHash('sha256').update(seedIp === '127.0.0.1' ? 'LOCAL-VISION-ROOM-KEY' : seedIp).digest('hex').toUpperCase();
+  
+  const part1 = hash.substring(0, 4);
+  const part2 = hash.substring(4, 8);
+  const roomId = `IP-${part1}-${part2}`;
+
   if (isLocal) {
-    // For local networks (e.g. 192.168.1.x), group by /24 subnet
-    const parts = ip.split('.');
-    if (parts.length === 4) {
-      return {
-        roomId: `LAN-${parts[0]}-${parts[1]}-${parts[2]}`,
-        roomName: `Local Wi-Fi Network (${parts[0]}.${parts[1]}.${parts[2]}.x)`,
-        isLocal: true,
-        networkType: 'Local Network'
-      };
-    }
     return {
-      roomId: 'LAN-Localhost',
-      roomName: 'Local Development Network',
+      roomId,
+      roomName: 'Local Network',
       isLocal: true,
-      networkType: 'Localhost'
+      networkType: 'Local Network'
     };
   }
 
-  // For public IPs, group by full public IP or /24 subnet for NAT router rooms
-  const hash = crypto.createHash('md5').update(ip).digest('hex').substring(0, 8).toUpperCase();
   const maskedIp = maskIp(ip);
   return {
-    roomId: `IP-${hash}`,
+    roomId,
     roomName: `Network Room (${maskedIp})`,
     isLocal: false,
     networkType: 'Public Wi-Fi / ISP'
@@ -114,8 +129,10 @@ function maskIp(ip) {
 }
 
 module.exports = {
+  getServerLanIp,
   getClientIp,
   isPrivateIp,
   getAutoRoomForIp,
   maskIp
 };
+

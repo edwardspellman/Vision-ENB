@@ -8,7 +8,8 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' }
-  ]
+  ],
+  iceCandidatePoolSize: 10
 };
 
 export function WebRTCProvider({ children }) {
@@ -38,6 +39,7 @@ export function WebRTCProvider({ children }) {
 
   // P2P DataChannel Refs
   const p2pPeerRef = useRef(null);
+  const p2pPendingIceRef = useRef([]);
   const dataChannelRef = useRef(null);
   const receivedChunksRef = useRef([]);
   const receivedSizeRef = useRef(0);
@@ -153,8 +155,13 @@ export function WebRTCProvider({ children }) {
           isSender: false
         });
 
+        if (p2pPeerRef.current) {
+          try { p2pPeerRef.current.close(); } catch(e){}
+        }
+
         const pc = new RTCPeerConnection(ICE_SERVERS);
         p2pPeerRef.current = pc;
+        p2pPendingIceRef.current = [];
         receivedChunksRef.current = [];
         receivedSizeRef.current = 0;
 
@@ -171,11 +178,10 @@ export function WebRTCProvider({ children }) {
             setP2pTransfer((prev) => prev ? {
               ...prev,
               progress,
-              status: progress === 100 ? 'Transfer Complete!' : `Receiving... ${progress}%`
+              status: progress === 100 ? 'Transfer Complete! 🎉' : `Receiving... ${progress}%`
             } : null);
 
             if (receivedSizeRef.current >= fileMetadata.fileSize) {
-              // Assemble blob and download
               const blob = new Blob(receivedChunksRef.current);
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
@@ -197,12 +203,20 @@ export function WebRTCProvider({ children }) {
         };
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+        // Add queued ICE candidates
+        while (p2pPendingIceRef.current.length > 0) {
+          const candidate = p2pPendingIceRef.current.shift();
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
         socket.emit('webrtc_p2p_file_answer', { targetSocketId: senderSocketId, answer });
       } catch (err) {
         console.error('Failed receiving P2P file offer:', err);
+        setP2pTransfer(null);
       }
     });
 
@@ -210,6 +224,10 @@ export function WebRTCProvider({ children }) {
       try {
         if (p2pPeerRef.current) {
           await p2pPeerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+          while (p2pPendingIceRef.current.length > 0) {
+            const candidate = p2pPendingIceRef.current.shift();
+            try { await p2pPeerRef.current.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
+          }
         }
       } catch (err) {
         console.error('Failed setting P2P file answer:', err);
@@ -219,7 +237,11 @@ export function WebRTCProvider({ children }) {
     socket.on('webrtc_p2p_file_ice', async ({ senderSocketId, candidate }) => {
       try {
         if (p2pPeerRef.current && candidate) {
-          await p2pPeerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          if (p2pPeerRef.current.remoteDescription && p2pPeerRef.current.remoteDescription.type) {
+            await p2pPeerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } else {
+            p2pPendingIceRef.current.push(candidate);
+          }
         }
       } catch (err) {
         console.error('Failed adding P2P file ICE candidate:', err);
@@ -294,8 +316,13 @@ export function WebRTCProvider({ children }) {
         isSender: true
       });
 
+      if (p2pPeerRef.current) {
+        try { p2pPeerRef.current.close(); } catch(e){}
+      }
+
       const pc = new RTCPeerConnection(ICE_SERVERS);
       p2pPeerRef.current = pc;
+      p2pPendingIceRef.current = [];
 
       const dc = pc.createDataChannel('fileTransfer');
       dc.binaryType = 'arraybuffer';
@@ -318,6 +345,7 @@ export function WebRTCProvider({ children }) {
         };
 
         fileReader.onload = (e) => {
+          if (dc.readyState !== 'open') return;
           dc.send(e.target.result);
           offset += e.target.result.byteLength;
           const progress = Math.min(100, Math.round((offset / file.size) * 100));
@@ -325,11 +353,10 @@ export function WebRTCProvider({ children }) {
           setP2pTransfer((prev) => prev ? {
             ...prev,
             progress,
-            status: progress === 100 ? 'File Sent Successfully!' : `Sending... ${progress}%`
+            status: progress === 100 ? 'File Sent Successfully! 🎉' : `Sending... ${progress}%`
           } : null);
 
           if (offset < file.size) {
-            // Respect bufferedAmount to prevent buffer overflow
             if (dc.bufferedAmount > 65536) {
               setTimeout(() => readSlice(offset), 50);
             } else {

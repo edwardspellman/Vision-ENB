@@ -1,143 +1,18 @@
 const roomManager = require('./roomManager');
-const guildManager = require('./guildManager');
-const { getClientIp, getAutoRoomForIp } = require('./ipUtils');
+const { getClientIp, getAutoRoomForIp, getServerLanIp } = require('./ipUtils');
 
 module.exports = function socketHandler(io) {
   io.on('connection', (socket) => {
     const clientIp = getClientIp(socket);
     const autoRoom = getAutoRoomForIp(clientIp);
+    const lanIp = getServerLanIp();
 
     // Initial IP and network info
     socket.emit('client_ip_info', {
       ip: clientIp,
+      lanIp,
+      serverLanUrl: `http://${lanIp}:3000`,
       autoRoom
-    });
-
-    /**
-     * PERMANENT GUILDS SYSTEM
-     */
-    // Create Guild
-    socket.on('create_guild', (data, callback) => {
-      try {
-        const { name, description, password, user } = data;
-        const result = guildManager.createGuild({ name, description, password, hostUser: user || { name: 'Host' } });
-        if (result.success && result.guild) {
-          socket.join(result.guild.id);
-        }
-        if (callback) callback(result);
-      } catch (err) {
-        console.error('Error creating guild:', err);
-        if (callback) callback({ success: false, error: 'Failed to create guild' });
-      }
-    });
-
-    // Join Guild By Unique ID
-    socket.on('join_guild_by_id', (data, callback) => {
-      try {
-        const { guildId, password, user } = data;
-        const result = guildManager.joinGuild({ guildId, password, user: user || { name: 'User' } });
-        if (result.success && result.guild) {
-          socket.join(result.guild.id);
-          socket.to(result.guild.id).emit('guild_user_joined', { guildId, member: result.member });
-        }
-        if (callback) callback(result);
-      } catch (err) {
-        console.error('Error joining guild:', err);
-        if (callback) callback({ success: false, error: 'Failed to join guild' });
-      }
-    });
-
-    // Get User's Joined Guilds
-    socket.on('get_my_guilds', (data, callback) => {
-      try {
-        const guildIds = data && Array.isArray(data.guildIds) ? data.guildIds : [];
-        const guilds = guildManager.getUserGuilds(guildIds);
-        guilds.forEach((g) => socket.join(g.id));
-        if (callback) callback({ success: true, guilds });
-      } catch (err) {
-        console.error('Error getting my guilds:', err);
-        if (callback) callback({ success: false, error: 'Failed to fetch guilds' });
-      }
-    });
-
-    // Send Guild Message with Custom Expiration
-    socket.on('send_guild_message', (data, callback) => {
-      try {
-        const { guildId, text, type, fileUrl, fileName, fileSize, expiryMinutes } = data;
-        const mapping = roomManager.socketMap.get(socket.id);
-        const sender = mapping ? mapping.user : (data.user || { name: 'User' });
-
-        const message = guildManager.addGuildMessage(guildId, {
-          sender,
-          text,
-          type,
-          fileUrl,
-          fileName,
-          fileSize,
-          expiryMinutes
-        });
-
-        if (message) {
-          io.to(guildId).emit('new_guild_message', { guildId, message });
-          if (callback) callback({ success: true, message });
-        } else {
-          if (callback) callback({ success: false, error: 'Failed to post guild message' });
-        }
-      } catch (err) {
-        console.error('Error sending guild message:', err);
-        if (callback) callback({ success: false, error: 'Error sending guild message' });
-      }
-    });
-
-    // Transfer Guild Host Ownership / Adminship
-    socket.on('transfer_guild_ownership', (data, callback) => {
-      try {
-        const { guildId, targetUserId } = data;
-        const mapping = roomManager.socketMap.get(socket.id);
-        const currentHostId = mapping ? (mapping.user.id || mapping.user.name) : data.currentHostId;
-
-        const result = guildManager.transferOwnership({ guildId, currentHostId, targetUserId });
-        if (result.success) {
-          io.to(guildId).emit('guild_updated', result.guild);
-        }
-        if (callback) callback(result);
-      } catch (err) {
-        console.error('Error transferring guild ownership:', err);
-        if (callback) callback({ success: false, error: 'Failed to transfer ownership' });
-      }
-    });
-
-    // Promote / Demote Guild Admin Role
-    socket.on('promote_guild_admin', (data, callback) => {
-      try {
-        const { guildId, targetUserId, newRole } = data;
-        const mapping = roomManager.socketMap.get(socket.id);
-        const requesterId = mapping ? (mapping.user.id || mapping.user.name) : data.requesterId;
-
-        const result = guildManager.promoteAdmin({ guildId, requesterId, targetUserId, newRole });
-        if (result.success) {
-          io.to(guildId).emit('guild_updated', result.guild);
-        }
-        if (callback) callback(result);
-      } catch (err) {
-        console.error('Error promoting guild admin:', err);
-        if (callback) callback({ success: false, error: 'Failed to update admin role' });
-      }
-    });
-
-    /**
-     * WATCH PARTY SYNCHRONIZED THEATER
-     */
-    socket.on('watchparty_action', ({ roomId, guildId, action, currentTime, sourceUrl }) => {
-      const target = roomId || guildId;
-      if (target) {
-        socket.to(target).emit('watchparty_sync', {
-          action, // 'play' | 'pause' | 'seek' | 'change_source'
-          currentTime,
-          sourceUrl,
-          senderSocketId: socket.id
-        });
-      }
     });
 
     /**
@@ -279,7 +154,7 @@ module.exports = function socketHandler(io) {
 
         // Leave previous socket rooms and join target room
         Array.from(socket.rooms).forEach(r => {
-          if (r !== socket.id && !r.startsWith('GUILD-')) socket.leave(r);
+          if (r !== socket.id) socket.leave(r);
         });
         socket.join(targetRoomId);
 
@@ -324,9 +199,19 @@ module.exports = function socketHandler(io) {
     socket.on('send_message', (data, callback) => {
       try {
         const { roomId, text, type, fileUrl, fileName, fileSize, audioDuration } = data;
-        const mapping = roomManager.socketMap.get(socket.id);
+        let mapping = roomManager.socketMap.get(socket.id);
 
         if (!mapping || mapping.roomId !== roomId) {
+          const room = roomManager.rooms.get(roomId) || roomManager.getOrCreateAutoRoom(autoRoom);
+          if (room) {
+            const sender = data.user || data.sender || { name: 'User', avatar: 'bot' };
+            roomManager.addUser(socket.id, room.id, sender);
+            socket.join(room.id);
+            mapping = roomManager.socketMap.get(socket.id);
+          }
+        }
+
+        if (!mapping) {
           return callback && callback({ success: false, error: 'Not in this room' });
         }
 

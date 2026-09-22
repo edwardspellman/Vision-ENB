@@ -6,13 +6,23 @@ import {
   FileText, 
   Smile, 
   Check, 
+  CheckCheck,
   Copy, 
-  ExternalLink 
+  ExternalLink
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { getAvatarSvg } from '../utils/avatar';
+import { getBackendUrl } from '../utils/config';
 
 const POPULAR_EMOJIS = ['👍', '❤️', '🔥', '😂', '🎉', '🚀', '👀'];
+
+const getFullUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) {
+    return url;
+  }
+  return `${getBackendUrl()}${url.startsWith('/') ? '' : '/'}${url}`;
+};
 
 export default function MessageItem({ message, onImageClick }) {
   const { user, toggleReaction } = useSocket();
@@ -126,7 +136,16 @@ export default function MessageItem({ message, onImageClick }) {
           <span className="font-semibold text-zinc-300">
             {isMe ? 'You' : message.sender?.name}
           </span>
-          <span className="text-zinc-500">{formatTime(message.timestamp)}</span>
+          <span className="text-zinc-500">{formatTime(message.timestamp || message.createdAt)}</span>
+          {isMe && !isSystem && (
+            <span className="inline-flex items-center text-zinc-400 ml-1" title={message.pending ? 'Sending...' : 'Delivered'}>
+              {message.pending ? (
+                <Check className="w-3 h-3 text-zinc-500 animate-pulse" />
+              ) : (
+                <CheckCheck className="w-3.5 h-3.5 text-[#00f0ff]" />
+              )}
+            </span>
+          )}
         </div>
 
         {/* Message Bubble */}
@@ -151,11 +170,11 @@ export default function MessageItem({ message, onImageClick }) {
                 </div>
               ) : (
                 <div 
-                  onClick={() => onImageClick && onImageClick(message.fileUrl)}
+                  onClick={() => onImageClick && onImageClick(getFullUrl(message.fileUrl))}
                   className="rounded-lg overflow-hidden cursor-pointer max-w-sm max-h-72 border border-[#161f30] hover:border-[#00ff88]/50 transition"
                 >
                   <img
-                    src={message.fileUrl}
+                    src={getFullUrl(message.fileUrl)}
                     alt={message.fileName || 'Shared Image'}
                     className="w-full h-full object-cover"
                     loading="lazy"
@@ -186,7 +205,7 @@ export default function MessageItem({ message, onImageClick }) {
 
                 <audio
                   ref={audioRef}
-                  src={message.fileUrl}
+                  src={getFullUrl(message.fileUrl)}
                   onEnded={() => setIsPlayingAudio(false)}
                   onError={() => setMediaExpired(true)}
                   className="hidden"
@@ -222,7 +241,7 @@ export default function MessageItem({ message, onImageClick }) {
               ) : (
                 <div className="rounded-lg overflow-hidden max-w-sm border border-[#161f30] bg-[#020408]">
                   <video
-                    src={message.fileUrl}
+                    src={getFullUrl(message.fileUrl)}
                     controls
                     preload="metadata"
                     onError={() => setMediaExpired(true)}
@@ -232,7 +251,7 @@ export default function MessageItem({ message, onImageClick }) {
                     <div className="p-2 flex items-center justify-between text-[11px] text-zinc-400 bg-[#05080f] border-t border-[#161f30]">
                       <span className="truncate max-w-[200px] font-semibold">{message.fileName}</span>
                       <a
-                        href={message.fileUrl}
+                        href={getFullUrl(message.fileUrl)}
                         download={message.fileName || 'video'}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -254,7 +273,7 @@ export default function MessageItem({ message, onImageClick }) {
           {/* File Attachment */}
           {message.type === 'file' && (
             <a
-              href={message.fileUrl}
+              href={getFullUrl(message.fileUrl)}
               download={message.fileName || 'file'}
               target="_blank"
               rel="noopener noreferrer"
@@ -296,8 +315,8 @@ export default function MessageItem({ message, onImageClick }) {
           )}
         </div>
 
-        {/* Hover Quick Reaction Trigger */}
-        <div className="relative mt-0.5 opacity-0 group-hover:opacity-100 transition">
+        {/* Hover Quick Action Toolbar */}
+        <div className="relative mt-0.5 opacity-0 group-hover:opacity-100 transition flex items-center space-x-1">
           <button
             onClick={() => setShowEmojiPicker(!showEmojiPicker)}
             className="p-1 text-zinc-500 hover:text-[#00ff88] transition"
