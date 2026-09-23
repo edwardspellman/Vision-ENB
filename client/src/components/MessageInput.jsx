@@ -61,6 +61,11 @@ export default function MessageInput() {
     if (e) e.preventDefault();
 
     if (selectedFile) {
+      if (selectedFile.size > 500 * 1024 * 1024) {
+        alert(`"${selectedFile.name}" is over 500MB.\nFor large files (3GB - 10GB+), please use Direct P2P File Transfer in the Room Members list!`);
+        return;
+      }
+
       setIsUploading(true);
       const formData = new FormData();
       formData.append('file', selectedFile);
@@ -82,10 +87,12 @@ export default function MessageInput() {
           });
           clearFileSelection();
           setText('');
+        } else {
+          alert(data.error || 'File upload failed. Please check file format or room permissions.');
         }
       } catch (err) {
         console.error('File upload error:', err);
-        alert('File upload failed.');
+        alert('File upload failed. Network error or server payload size limit exceeded.');
       } finally {
         setIsUploading(false);
       }
@@ -113,6 +120,10 @@ export default function MessageInput() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    if (file.size > 500 * 1024 * 1024) {
+      alert(`"${file.name}" (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds standard HTTP server upload limit.\n\nTip: You can transfer files of any size (3GB - 10GB+) directly via P2P Stream to any room member in the sidebar menu!`);
+    }
 
     setSelectedFile(file);
     if (file.type.startsWith('image/')) {
@@ -233,16 +244,19 @@ export default function MessageInput() {
 
         {/* Action Controls (Left) */}
         <div className="flex items-center space-x-1 pb-1">
-          {allowFileUploads && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-zinc-400 hover:text-[#00f0ff] rounded-xl bg-[#080d17] border border-[#161f30] hover:border-[#00f0ff]/40 transition"
-              title="Attach file or image"
-            >
-              <Paperclip className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={!allowFileUploads}
+            onClick={() => allowFileUploads && fileInputRef.current?.click()}
+            className={`p-2 rounded-xl bg-[#080d17] border transition ${
+              allowFileUploads 
+                ? 'text-zinc-400 hover:text-[#00f0ff] border-[#161f30] hover:border-[#00f0ff]/40' 
+                : 'text-zinc-600 border-[#161f30]/50 cursor-not-allowed opacity-50'
+            }`}
+            title={allowFileUploads ? "Attach file or image to room chat" : "File sharing is restricted by Room Host"}
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
 
           <button
             type="button"

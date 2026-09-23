@@ -27,10 +27,10 @@ const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.bat', '.cmd', '.vbs', '.phtml', '.hta', '.jar', '.jsp', '.asp', '.aspx'
 ]);
 
-// Max 50MB per file with security fileFilter
+// Max 500MB per HTTP room upload with security fileFilter
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (BLOCKED_EXTENSIONS.has(ext)) {
