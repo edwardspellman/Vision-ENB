@@ -16,10 +16,16 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname) || (file.mimetype.includes('audio') ? '.webm' : '');
+    let ext = path.extname(file.originalname).toLowerCase();
+    if (!ext || ext === '') {
+      const mime = (file.mimetype || '').toLowerCase();
+      if (mime.includes('audio')) ext = '.webm';
+      else if (mime.includes('video')) ext = '.mp4';
+      else if (mime.includes('image')) ext = '.png';
+      else ext = '.bin';
+    }
     const cleanName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
-    cb(null, `${cleanName}-${uniqueSuffix}${ext}`);
+    cb(null, `${cleanName || 'upload'}-${uniqueSuffix}${ext}`);
   }
 });
 

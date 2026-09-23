@@ -60,11 +60,20 @@ export default function MessageItem({ message, onImageClick }) {
   const handleToggleAudio = () => {
     if (!audioRef.current) return;
     if (isPlayingAudio) {
-      audioRef.current.pause();
+      try { audioRef.current.pause(); } catch(e){}
       setIsPlayingAudio(false);
     } else {
-      audioRef.current.play();
-      setIsPlayingAudio(true);
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => setIsPlayingAudio(true))
+          .catch((err) => {
+            console.warn('Audio play failed:', err);
+            setIsPlayingAudio(false);
+          });
+      } else {
+        setIsPlayingAudio(true);
+      }
     }
   };
 
