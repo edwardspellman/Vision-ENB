@@ -234,7 +234,7 @@ module.exports = function socketHandler(io) {
         const safeText = (typeof text === 'string') ? text.slice(0, 10000) : '';
         const allowedTypes = ['text', 'image', 'audio', 'video', 'file'];
         const safeType = allowedTypes.includes(type) ? type : 'text';
-        const safeFileUrl = (typeof fileUrl === 'string' && fileUrl.startsWith('/uploads/')) ? fileUrl : null;
+        const safeFileUrl = (typeof fileUrl === 'string' && fileUrl.trim().length > 0) ? fileUrl.trim() : null;
         const safeFileName = (typeof fileName === 'string') ? fileName.slice(0, 255) : null;
 
         const message = roomManager.addMessage(roomId, {

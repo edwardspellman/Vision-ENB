@@ -51,9 +51,12 @@ router.post('/', (req, res) => {
     }
 
     const fileUrl = `/uploads/${req.file.filename}`;
-    const isImage = req.file.mimetype.startsWith('image/');
-    const isAudio = req.file.mimetype.startsWith('audio/');
-    const isVideo = req.file.mimetype.startsWith('video/');
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const mime = (req.file.mimetype || '').toLowerCase();
+
+    const isImage = mime.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.heic', '.avif'].includes(ext);
+    const isAudio = mime.startsWith('audio/') || ['.webm', '.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.opus', '.3gp'].includes(ext);
+    const isVideo = mime.startsWith('video/') || ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.3gp', '.m4v'].includes(ext);
 
     res.json({
       success: true,

@@ -25,16 +25,31 @@ export default function VoiceRecorder({ onSendAudio, onCancel }) {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
+
+      let mimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+          mimeType = 'audio/aac';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        }
+      }
+
+      const options = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(mimeType)) ? { mimeType } : undefined;
+      mediaRecorderRef.current = new MediaRecorder(stream, options);
       audioChunksRef.current = [];
 
       mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+        if (e.data && e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
       };
 
-      mediaRecorderRef.current.start();
+      mediaRecorderRef.current.start(100); // chunk every 100ms
       setIsRecording(true);
 
       timerRef.current = setInterval(() => {
@@ -54,10 +69,14 @@ export default function VoiceRecorder({ onSendAudio, onCancel }) {
     clearInterval(timerRef.current);
 
     mediaRecorderRef.current.onstop = async () => {
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+      const isMp4 = recordedType.includes('mp4') || recordedType.includes('aac');
+      const ext = isMp4 ? '.m4a' : '.webm';
+
+      const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
       
       const formData = new FormData();
-      formData.append('file', audioBlob, `voice-note-${Date.now()}.webm`);
+      formData.append('file', audioBlob, `voice-note-${Date.now()}${ext}`);
 
       try {
         const res = await fetch(`${getBackendUrl()}/api/upload`, {
@@ -71,21 +90,23 @@ export default function VoiceRecorder({ onSendAudio, onCancel }) {
             fileUrl: data.fileUrl,
             fileName: 'Voice Note',
             fileSize: data.fileSize,
-            audioDuration: recordingTime
+            audioDuration: Math.max(1, recordingTime)
           });
         } else {
-          alert('Upload failed');
+          alert(data.error || 'Voice note upload failed');
         }
       } catch (err) {
         console.error('Upload voice error:', err);
-        alert('Network upload failed');
+        alert('Voice note upload failed. Network error.');
       } finally {
         setIsUploading(false);
       }
     };
 
     mediaRecorderRef.current.stop();
-    mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+    if (mediaRecorderRef.current.stream) {
+      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+    }
   };
 
   const handleCancel = () => {
