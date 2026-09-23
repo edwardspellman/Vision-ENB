@@ -40,6 +40,14 @@ module.exports = function socketHandler(io) {
       });
     });
 
+    socket.on('webrtc_p2p_file_cancel', ({ targetSocketId }) => {
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('webrtc_p2p_file_cancel', {
+          senderSocketId: socket.id
+        });
+      }
+    });
+
     /**
      * CREATE CUSTOM ROOM
      */

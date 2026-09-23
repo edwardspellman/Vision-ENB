@@ -37,12 +37,17 @@ export function WebRTCProvider({ children }) {
   const pendingIceCandidatesRef = useRef([]);
   const wasVoiceCallRef = useRef(false);
 
-  // P2P DataChannel Refs
+  // P2P DataChannel Refs & Disk Streaming Engine
   const p2pPeerRef = useRef(null);
   const p2pPendingIceRef = useRef([]);
   const dataChannelRef = useRef(null);
   const receivedChunksRef = useRef([]);
   const receivedSizeRef = useRef(0);
+  const pendingP2pOfferRef = useRef(null);
+  const activeFileWriterRef = useRef(null);
+  const isSendingRef = useRef(false);
+  const p2pTargetSocketIdRef = useRef(null);
+  const p2pStartTimeRef = useRef(0);
 
   // Setup WebRTC socket listeners
   useEffect(() => {
@@ -147,73 +152,21 @@ export function WebRTCProvider({ children }) {
      */
     socket.on('webrtc_p2p_file_offer', async ({ senderSocketId, offer, fileMetadata }) => {
       try {
+        pendingP2pOfferRef.current = { senderSocketId, offer, fileMetadata };
+        p2pTargetSocketIdRef.current = senderSocketId;
+
         setP2pTransfer({
           fileName: fileMetadata.fileName,
           fileSize: fileMetadata.fileSize,
+          transferredBytes: 0,
           progress: 0,
-          status: 'Receiving P2P Stream...',
-          isSender: false
+          status: 'Incoming Direct P2P Transfer Request',
+          speedMBs: '0.0',
+          etaSeconds: 0,
+          isSender: false,
+          isPendingAccept: true,
+          senderSocketId
         });
-
-        if (p2pPeerRef.current) {
-          try { p2pPeerRef.current.close(); } catch(e){}
-        }
-
-        const pc = new RTCPeerConnection(ICE_SERVERS);
-        p2pPeerRef.current = pc;
-        p2pPendingIceRef.current = [];
-        receivedChunksRef.current = [];
-        receivedSizeRef.current = 0;
-
-        pc.ondatachannel = (event) => {
-          const dc = event.channel;
-          dc.binaryType = 'arraybuffer';
-          dataChannelRef.current = dc;
-
-          dc.onmessage = (msgEvent) => {
-            receivedChunksRef.current.push(msgEvent.data);
-            receivedSizeRef.current += msgEvent.data.byteLength;
-            const progress = Math.min(100, Math.round((receivedSizeRef.current / fileMetadata.fileSize) * 100));
-
-            setP2pTransfer((prev) => prev ? {
-              ...prev,
-              progress,
-              status: progress === 100 ? 'Transfer Complete! 🎉' : `Receiving... ${progress}%`
-            } : null);
-
-            if (receivedSizeRef.current >= fileMetadata.fileSize) {
-              const blob = new Blob(receivedChunksRef.current);
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = fileMetadata.fileName;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-
-              setTimeout(() => setP2pTransfer(null), 4000);
-            }
-          };
-        };
-
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            socket.emit('webrtc_p2p_file_ice', { targetSocketId: senderSocketId, candidate: e.candidate });
-          }
-        };
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-        // Add queued ICE candidates
-        while (p2pPendingIceRef.current.length > 0) {
-          const candidate = p2pPendingIceRef.current.shift();
-          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
-        }
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        socket.emit('webrtc_p2p_file_answer', { targetSocketId: senderSocketId, answer });
       } catch (err) {
         console.error('Failed receiving P2P file offer:', err);
         setP2pTransfer(null);
@@ -248,6 +201,24 @@ export function WebRTCProvider({ children }) {
       }
     });
 
+    socket.on('webrtc_p2p_file_cancel', () => {
+      isSendingRef.current = false;
+      if (activeFileWriterRef.current) {
+        try { activeFileWriterRef.current.abort(); } catch(e){}
+        activeFileWriterRef.current = null;
+      }
+      if (p2pPeerRef.current) {
+        try { p2pPeerRef.current.close(); } catch(e){}
+        p2pPeerRef.current = null;
+      }
+      dataChannelRef.current = null;
+      receivedChunksRef.current = [];
+      receivedSizeRef.current = 0;
+      pendingP2pOfferRef.current = null;
+      p2pTargetSocketIdRef.current = null;
+      setP2pTransfer(null);
+    });
+
     return () => {
       socket.off('webrtc_incoming_call');
       socket.off('webrtc_call_accepted');
@@ -259,6 +230,7 @@ export function WebRTCProvider({ children }) {
       socket.off('webrtc_p2p_file_offer');
       socket.off('webrtc_p2p_file_answer');
       socket.off('webrtc_p2p_file_ice');
+      socket.off('webrtc_p2p_file_cancel');
     };
   }, [socket, callState]);
 
@@ -302,18 +274,209 @@ export function WebRTCProvider({ children }) {
   };
 
   /**
-   * Send a file P2P via WebRTC DataChannel (Unlimited MB file transfer with 0 server storage load)
+   * Accept an incoming P2P direct file transfer (Zero-RAM Disk Stream)
+   */
+  const acceptP2PTransfer = async () => {
+    const pending = pendingP2pOfferRef.current;
+    if (!pending || !socket) return;
+
+    let fileWriter = null;
+
+    if (window.showSaveFilePicker) {
+      try {
+        const fileHandle = await window.showSaveFilePicker({
+          suggestedName: pending.fileMetadata.fileName
+        });
+        fileWriter = await fileHandle.createWritable();
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          // User closed/cancelled file picker
+          cancelP2PTransfer();
+          return;
+        }
+        console.warn('showSaveFilePicker unavailable or rejected:', err);
+      }
+    }
+
+    if (!fileWriter && navigator.storage && navigator.storage.getDirectory) {
+      try {
+        const root = await navigator.storage.getDirectory();
+        const handle = await root.getFileHandle(`p2p_file_${Date.now()}_${pending.fileMetadata.fileName}`, { create: true });
+        if (handle.createWritable) {
+          fileWriter = await handle.createWritable();
+        }
+      } catch (opfsErr) {
+        console.warn('OPFS createWritable fallback failed:', opfsErr);
+      }
+    }
+
+    activeFileWriterRef.current = fileWriter;
+
+    setP2pTransfer({
+      fileName: pending.fileMetadata.fileName,
+      fileSize: pending.fileMetadata.fileSize,
+      transferredBytes: 0,
+      progress: 0,
+      status: 'Establishing P2P Stream...',
+      speedMBs: '0.0',
+      etaSeconds: 0,
+      isSender: false,
+      isPendingAccept: false
+    });
+
+    if (p2pPeerRef.current) {
+      try { p2pPeerRef.current.close(); } catch(e){}
+    }
+
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    p2pPeerRef.current = pc;
+    p2pPendingIceRef.current = [];
+    receivedChunksRef.current = [];
+    receivedSizeRef.current = 0;
+    p2pStartTimeRef.current = Date.now();
+
+    let lastTime = Date.now();
+    let lastBytes = 0;
+
+    pc.ondatachannel = (event) => {
+      const dc = event.channel;
+      dc.binaryType = 'arraybuffer';
+      dataChannelRef.current = dc;
+
+      dc.onmessage = async (msgEvent) => {
+        const chunkSize = msgEvent.data.byteLength;
+        receivedSizeRef.current += chunkSize;
+
+        if (activeFileWriterRef.current) {
+          try {
+            await activeFileWriterRef.current.write(msgEvent.data);
+          } catch (writeErr) {
+            console.error('Disk stream write error:', writeErr);
+          }
+        } else {
+          receivedChunksRef.current.push(msgEvent.data);
+        }
+
+        const now = Date.now();
+        const timeDiff = (now - lastTime) / 1000;
+
+        if (timeDiff >= 0.25 || receivedSizeRef.current >= pending.fileMetadata.fileSize) {
+          const bytesSinceLast = receivedSizeRef.current - lastBytes;
+          const speedBytes = bytesSinceLast / (timeDiff || 0.001);
+          const speedMBs = speedBytes / (1024 * 1024);
+          const remainingBytes = pending.fileMetadata.fileSize - receivedSizeRef.current;
+          const etaSeconds = speedBytes > 0 ? Math.ceil(remainingBytes / speedBytes) : 0;
+
+          lastTime = now;
+          lastBytes = receivedSizeRef.current;
+
+          const progress = Math.min(100, Math.round((receivedSizeRef.current / pending.fileMetadata.fileSize) * 100));
+
+          setP2pTransfer((prev) => prev ? {
+            ...prev,
+            progress,
+            transferredBytes: receivedSizeRef.current,
+            speedMBs: speedMBs.toFixed(1),
+            etaSeconds,
+            status: progress === 100 ? 'Transfer Complete! 🎉' : `Receiving... ${progress}%`
+          } : null);
+        }
+
+        if (receivedSizeRef.current >= pending.fileMetadata.fileSize) {
+          if (activeFileWriterRef.current) {
+            try {
+              await activeFileWriterRef.current.close();
+              activeFileWriterRef.current = null;
+            } catch(e){}
+          } else {
+            try {
+              const blob = new Blob(receivedChunksRef.current);
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = pending.fileMetadata.fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              receivedChunksRef.current = [];
+            } catch (blobErr) {
+              console.error('Fallback Blob download error:', blobErr);
+            }
+          }
+
+          setTimeout(() => setP2pTransfer(null), 5000);
+        }
+      };
+    };
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate && socket) {
+        socket.emit('webrtc_p2p_file_ice', { targetSocketId: pending.senderSocketId, candidate: e.candidate });
+      }
+    };
+
+    await pc.setRemoteDescription(new RTCSessionDescription(pending.offer));
+
+    while (p2pPendingIceRef.current.length > 0) {
+      const candidate = p2pPendingIceRef.current.shift();
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){}
+    }
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    socket.emit('webrtc_p2p_file_answer', { targetSocketId: pending.senderSocketId, answer });
+  };
+
+  /**
+   * Cancel an ongoing P2P direct file transfer
+   */
+  const cancelP2PTransfer = () => {
+    isSendingRef.current = false;
+
+    if (socket && p2pTargetSocketIdRef.current) {
+      socket.emit('webrtc_p2p_file_cancel', { targetSocketId: p2pTargetSocketIdRef.current });
+    }
+
+    if (activeFileWriterRef.current) {
+      try { activeFileWriterRef.current.abort(); } catch(e){}
+      activeFileWriterRef.current = null;
+    }
+
+    if (p2pPeerRef.current) {
+      try { p2pPeerRef.current.close(); } catch(e){}
+      p2pPeerRef.current = null;
+    }
+
+    dataChannelRef.current = null;
+    receivedChunksRef.current = [];
+    receivedSizeRef.current = 0;
+    pendingP2pOfferRef.current = null;
+    p2pTargetSocketIdRef.current = null;
+    setP2pTransfer(null);
+  };
+
+  /**
+   * Send a file P2P via WebRTC DataChannel (Unlimited 3GB - 100GB+ file transfer with 0 server storage load)
    */
   const sendP2PFile = async (targetSocketId, file) => {
     if (!socket || !targetSocketId || !file) return;
 
     try {
+      p2pTargetSocketIdRef.current = targetSocketId;
+      isSendingRef.current = true;
+
       setP2pTransfer({
         fileName: file.name,
         fileSize: file.size,
+        transferredBytes: 0,
         progress: 0,
         status: 'Connecting P2P DataChannel...',
-        isSender: true
+        speedMBs: '0.0',
+        etaSeconds: 0,
+        isSender: true,
+        isPendingAccept: false,
+        targetSocketId
       });
 
       if (p2pPeerRef.current) {
@@ -326,6 +489,7 @@ export function WebRTCProvider({ children }) {
 
       const dc = pc.createDataChannel('fileTransfer');
       dc.binaryType = 'arraybuffer';
+      dc.bufferedAmountLowThreshold = 1024 * 1024; // 1 MB backpressure limit
       dataChannelRef.current = dc;
 
       pc.onicecandidate = (e) => {
@@ -335,39 +499,65 @@ export function WebRTCProvider({ children }) {
       };
 
       dc.onopen = async () => {
-        const chunkSize = 16384; // 16KB chunks
-        const fileReader = new FileReader();
+        const chunkSize = 65536; // 64 KB WebRTC chunk size
         let offset = 0;
+        p2pStartTimeRef.current = Date.now();
+        let lastTime = Date.now();
+        let lastBytes = 0;
 
-        const readSlice = (o) => {
-          const slice = file.slice(o, o + chunkSize);
-          fileReader.readAsArrayBuffer(slice);
-        };
-
-        fileReader.onload = (e) => {
-          if (dc.readyState !== 'open') return;
-          dc.send(e.target.result);
-          offset += e.target.result.byteLength;
-          const progress = Math.min(100, Math.round((offset / file.size) * 100));
-
-          setP2pTransfer((prev) => prev ? {
-            ...prev,
-            progress,
-            status: progress === 100 ? 'File Sent Successfully! 🎉' : `Sending... ${progress}%`
-          } : null);
-
-          if (offset < file.size) {
-            if (dc.bufferedAmount > 65536) {
-              setTimeout(() => readSlice(offset), 50);
-            } else {
-              readSlice(offset);
+        const sendLoop = async () => {
+          while (offset < file.size && dc.readyState === 'open' && isSendingRef.current) {
+            // Dynamic WebRTC backpressure: pause if buffer exceeds 1 MB
+            if (dc.bufferedAmount > dc.bufferedAmountLowThreshold) {
+              await new Promise((resolve) => {
+                dc.onbufferedamountlow = () => {
+                  dc.onbufferedamountlow = null;
+                  resolve();
+                };
+              });
             }
-          } else {
-            setTimeout(() => setP2pTransfer(null), 4000);
+
+            if (!isSendingRef.current || dc.readyState !== 'open') break;
+
+            const end = Math.min(offset + chunkSize, file.size);
+            const slice = file.slice(offset, end);
+            const buffer = await slice.arrayBuffer();
+
+            dc.send(buffer);
+            offset += buffer.byteLength;
+
+            const now = Date.now();
+            const timeDiff = (now - lastTime) / 1000;
+
+            if (timeDiff >= 0.25 || offset >= file.size) {
+              const bytesSinceLast = offset - lastBytes;
+              const speedBytes = bytesSinceLast / (timeDiff || 0.001);
+              const speedMBs = speedBytes / (1024 * 1024);
+              const remainingBytes = file.size - offset;
+              const etaSeconds = speedBytes > 0 ? Math.ceil(remainingBytes / speedBytes) : 0;
+
+              lastTime = now;
+              lastBytes = offset;
+
+              const progress = Math.min(100, Math.round((offset / file.size) * 100));
+
+              setP2pTransfer((prev) => prev ? {
+                ...prev,
+                progress,
+                transferredBytes: offset,
+                speedMBs: speedMBs.toFixed(1),
+                etaSeconds,
+                status: progress === 100 ? 'File Sent Successfully! 🎉' : `Sending... ${progress}%`
+              } : null);
+            }
+
+            if (offset >= file.size) {
+              setTimeout(() => setP2pTransfer(null), 5000);
+            }
           }
         };
 
-        readSlice(0);
+        sendLoop();
       };
 
       const offer = await pc.createOffer();
@@ -736,7 +926,9 @@ export function WebRTCProvider({ children }) {
         toggleCamera,
         switchCamera,
         toggleScreenShare,
-        sendP2PFile
+        sendP2PFile,
+        acceptP2PTransfer,
+        cancelP2PTransfer
       }}
     >
       {children}
