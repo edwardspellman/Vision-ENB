@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
-const FILE_TTL_MS = 30 * 60 * 1000; // 30 minutes in milliseconds
+const FILE_TTL_MS = 3 * 60 * 1000; // 3 minutes in milliseconds
 
 /**
  * Ensures the uploads directory exists
@@ -47,8 +47,8 @@ function deleteUploadFile(fileUrl) {
 }
 
 /**
- * Scans server/uploads directory and deletes any file older than 30 minutes
- * @param {number} [customTtl] optional TTL override in ms (defaults to 30 minutes)
+ * Scans server/uploads directory and deletes any file older than 3 minutes
+ * @param {number} [customTtl] optional TTL override in ms (defaults to 3 minutes)
  * @returns {number} count of deleted files
  */
 function cleanupExpiredFiles(customTtl = FILE_TTL_MS) {
@@ -70,7 +70,7 @@ function cleanupExpiredFiles(customTtl = FILE_TTL_MS) {
           if (fileAge >= customTtl) {
             fs.unlinkSync(filePath);
             deletedCount++;
-            console.log(`[EPHEMERAL STORAGE] Purged 30-min expired upload: ${file} (age: ${Math.round(fileAge / 1000)}s)`);
+            console.log(`[EPHEMERAL STORAGE] Purged 3-min expired upload: ${file} (age: ${Math.round(fileAge / 1000)}s)`);
           }
         }
       } catch (fileErr) {
@@ -85,11 +85,11 @@ function cleanupExpiredFiles(customTtl = FILE_TTL_MS) {
 }
 
 /**
- * Starts periodic background sweeper for 30-minute expired files
- * @param {number} intervalMs scan frequency (default: 30 seconds)
+ * Starts periodic background sweeper for 3-minute expired files
+ * @param {number} intervalMs scan frequency (default: 15 seconds)
  * @returns {NodeJS.Timeout}
  */
-function startFileCleaner(intervalMs = 30 * 1000) {
+function startFileCleaner(intervalMs = 15 * 1000) {
   ensureUploadsDir();
   // Run an immediate sweep on boot
   cleanupExpiredFiles();

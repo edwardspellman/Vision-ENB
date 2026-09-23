@@ -166,7 +166,7 @@ export default function MessageItem({ message, onImageClick }) {
             <div className="space-y-1.5">
               {mediaExpired ? (
                 <div className="p-3 rounded-lg bg-[#04060a] border border-[#161f30] text-zinc-500 text-xs font-mono">
-                  <span>⏱️ File expired (30m Ephemeral Purge)</span>
+                  <span>⏱️ File expired (3m Ephemeral Purge)</span>
                 </div>
               ) : (
                 <div 
@@ -192,7 +192,7 @@ export default function MessageItem({ message, onImageClick }) {
           {message.type === 'audio' && (
             mediaExpired ? (
               <div className="py-1 px-2 text-zinc-500 text-xs font-mono">
-                <span>⏱️ Audio expired (30m Ephemeral Purge)</span>
+                <span>⏱️ Audio expired (3m Ephemeral Purge)</span>
               </div>
             ) : (
               <div className="flex items-center space-x-3 py-1 pr-2 min-w-[210px]">
@@ -236,7 +236,7 @@ export default function MessageItem({ message, onImageClick }) {
             <div className="space-y-1.5">
               {mediaExpired ? (
                 <div className="p-3 rounded-lg bg-[#04060a] border border-[#161f30] text-zinc-500 text-xs font-mono">
-                  <span>⏱️ Video expired (30m Ephemeral Purge)</span>
+                  <span>⏱️ Video expired (3m Ephemeral Purge)</span>
                 </div>
               ) : (
                 <div className="rounded-lg overflow-hidden max-w-sm border border-[#161f30] bg-[#020408]">

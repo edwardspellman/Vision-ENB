@@ -96,6 +96,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`⚡ VISION - Ephemeral Network Bridge online on http://localhost:${PORT}`);
   console.log(`📡 Socket.IO Real-time Bridge & WebRTC Signaling active`);
   console.log(`🛡️  Zero-Trace IP Subnet Routing initialized`);
-  console.log(`⏱️  30-Minute Ephemeral Storage & Message Purge active`);
+  console.log(`⏱️  3-Minute Ephemeral Storage & Message Purge active`);
   console.log(`======================================================\n`);
 });
