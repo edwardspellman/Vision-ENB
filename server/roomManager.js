@@ -9,21 +9,21 @@ class RoomManager {
     this.socketMap = new Map();
     // Maximum messages cached per room
     this.maxMessagesPerRoom = 200;
-    // Auto-purge all chat history (messages, photos, files, audio, system notifications) older than 3 minutes
-    this.messageTtl = 3 * 60 * 1000;
-    this.systemMessageTtl = 3 * 60 * 1000;
+    // Auto-purge all chat history (messages, photos, files, audio, system notifications) older than 30 minutes
+    this.messageTtl = 30 * 60 * 1000;
+    this.systemMessageTtl = 30 * 60 * 1000;
 
-    // Background interval to clean up expired messages and associated files every 15 seconds
+    // Background interval to clean up expired messages and associated files every 30 seconds
     const purgeTimer = setInterval(() => {
       this.purgeExpiredMessages();
-    }, 15 * 1000);
+    }, 30 * 1000);
     if (purgeTimer.unref) {
       purgeTimer.unref();
     }
   }
 
   /**
-   * Purge messages: automatically remove every chat message and delete physical files from disk after 3 minutes
+   * Purge messages: automatically remove every chat message and delete physical files from disk after 30 minutes
    */
   purgeExpiredMessages() {
     const cutoff = Date.now() - this.messageTtl;
@@ -34,7 +34,7 @@ class RoomManager {
           if (m.timestamp >= cutoff) {
             keptMessages.push(m);
           } else {
-            // Message expired (> 3 mins): if it contains an uploaded file/audio/video, delete it from disk
+            // Message expired (> 30 mins): if it contains an uploaded file/audio/video, delete it from disk
             if (m.fileUrl) {
               deleteUploadFile(m.fileUrl);
             }

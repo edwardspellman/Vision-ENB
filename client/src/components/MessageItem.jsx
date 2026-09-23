@@ -35,6 +35,15 @@ export default function MessageItem({ message, onImageClick }) {
   const isMe = message.sender?.id === user.id || message.sender?.name === user.name;
   const isSystem = message.type === 'system';
 
+  const messageAgeMs = (message.timestamp || message.createdAt) ? (Date.now() - new Date(message.timestamp || message.createdAt).getTime()) : 0;
+  const isTrulyExpired = messageAgeMs >= 30 * 60 * 1000;
+
+  const handleMediaError = () => {
+    if (isTrulyExpired) {
+      setMediaExpired(true);
+    }
+  };
+
   const formatTime = (ts) => {
     if (!ts) return '';
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -166,7 +175,7 @@ export default function MessageItem({ message, onImageClick }) {
             <div className="space-y-1.5">
               {mediaExpired ? (
                 <div className="p-3 rounded-lg bg-[#04060a] border border-[#161f30] text-zinc-500 text-xs font-mono">
-                  <span>⏱️ File expired (3m Ephemeral Purge)</span>
+                  <span>⏱️ File expired (30m Ephemeral Purge)</span>
                 </div>
               ) : (
                 <div 
@@ -178,7 +187,7 @@ export default function MessageItem({ message, onImageClick }) {
                     alt={message.fileName || 'Shared Image'}
                     className="w-full h-full object-cover"
                     loading="lazy"
-                    onError={() => setMediaExpired(true)}
+                    onError={handleMediaError}
                   />
                 </div>
               )}
@@ -192,7 +201,7 @@ export default function MessageItem({ message, onImageClick }) {
           {message.type === 'audio' && (
             mediaExpired ? (
               <div className="py-1 px-2 text-zinc-500 text-xs font-mono">
-                <span>⏱️ Audio expired (3m Ephemeral Purge)</span>
+                <span>⏱️ Audio expired (30m Ephemeral Purge)</span>
               </div>
             ) : (
               <div className="flex items-center space-x-3 py-1 pr-2 min-w-[210px]">
@@ -207,7 +216,7 @@ export default function MessageItem({ message, onImageClick }) {
                   ref={audioRef}
                   src={getFullUrl(message.fileUrl)}
                   onEnded={() => setIsPlayingAudio(false)}
-                  onError={() => setMediaExpired(true)}
+                  onError={handleMediaError}
                   className="hidden"
                 />
 
@@ -236,7 +245,7 @@ export default function MessageItem({ message, onImageClick }) {
             <div className="space-y-1.5">
               {mediaExpired ? (
                 <div className="p-3 rounded-lg bg-[#04060a] border border-[#161f30] text-zinc-500 text-xs font-mono">
-                  <span>⏱️ Video expired (3m Ephemeral Purge)</span>
+                  <span>⏱️ Video expired (30m Ephemeral Purge)</span>
                 </div>
               ) : (
                 <div className="rounded-lg overflow-hidden max-w-sm border border-[#161f30] bg-[#020408]">
@@ -244,7 +253,7 @@ export default function MessageItem({ message, onImageClick }) {
                     src={getFullUrl(message.fileUrl)}
                     controls
                     preload="metadata"
-                    onError={() => setMediaExpired(true)}
+                    onError={handleMediaError}
                     className="w-full max-h-72 rounded-lg object-contain"
                   />
                   {message.fileName && (

@@ -4,7 +4,7 @@ const path = require('path');
 
 async function testApi() {
   console.log('======================================================');
-  console.log('🧪 VISION PLATFORM // 3-MINUTE EPHEMERAL PURGE TESTS');
+  console.log('🧪 VISION PLATFORM // 30-MINUTE EPHEMERAL PURGE TESTS');
   console.log('======================================================\n');
 
   const ipUtils = require('./ipUtils');
@@ -83,26 +83,26 @@ async function testApi() {
 
   console.log('✔ Test 8: Text & System Message Dispatch:', textMsg && sysMsg ? 'PASSED' : 'FAILED');
 
-  // Test 9: 3-Minute Message Purge (All chat history older than 3 mins)
+  // Test 9: 30-Minute Message Purge (All chat history older than 30 mins)
   room.messages.push({
     id: 'old_msg_expired',
     type: 'text',
-    text: 'Old message from 4 minutes ago',
-    timestamp: Date.now() - (4 * 60 * 1000) // 4 minutes old
+    text: 'Old message from 31 minutes ago',
+    timestamp: Date.now() - (31 * 60 * 1000) // 31 minutes old
   });
   room.messages.push({
     id: 'recent_msg_active',
     type: 'text',
-    text: 'Recent message from 1 minute ago',
-    timestamp: Date.now() - (1 * 60 * 1000) // 1 minute old
+    text: 'Recent message from 5 minutes ago',
+    timestamp: Date.now() - (5 * 60 * 1000) // 5 minutes old
   });
 
   const filteredMessages = roomManager.getMessages('TEST-ROOM-SETTINGS-100');
   const hasExpired = filteredMessages.some(m => m.id === 'old_msg_expired');
   const hasActive = filteredMessages.some(m => m.id === 'recent_msg_active');
-  console.log('✔ Test 9: Messages older than 3 minutes are purged:', (!hasExpired && hasActive) ? 'PASSED' : 'FAILED');
+  console.log('✔ Test 9: Messages older than 30 minutes are purged:', (!hasExpired && hasActive) ? 'PASSED' : 'FAILED');
 
-  // Test 10: Ephemeral Storage Sweeper (Purges files older than 3 minutes from disk)
+  // Test 10: Ephemeral Storage Sweeper (Purges files older than 30 minutes from disk)
   const dummyOldFileName = `test-old-file-${Date.now()}.png`;
   const dummyRecentFileName = `test-recent-file-${Date.now()}.png`;
   const uploadsDir = path.join(__dirname, 'uploads');
@@ -114,9 +114,9 @@ async function testApi() {
   fs.writeFileSync(oldFilePath, 'mock-image-data-old');
   fs.writeFileSync(recentFilePath, 'mock-image-data-recent');
 
-  // Backdate the old file to 4 minutes ago
-  const fourMinsAgo = (Date.now() - 4 * 60 * 1000) / 1000;
-  fs.utimesSync(oldFilePath, fourMinsAgo, fourMinsAgo);
+  // Backdate the old file to 32 minutes ago
+  const thirtyTwoMinsAgo = (Date.now() - 32 * 60 * 1000) / 1000;
+  fs.utimesSync(oldFilePath, thirtyTwoMinsAgo, thirtyTwoMinsAgo);
 
   // Run the file cleaner
   fileCleaner.cleanupExpiredFiles();
@@ -126,7 +126,7 @@ async function testApi() {
   // Cleanup recent test file
   if (recentFileExists) fs.unlinkSync(recentFilePath);
 
-  console.log('✔ Test 10: Server disk file cleaner removes files >3 mins:', (!oldFileExists && recentFileExists) ? 'PASSED' : 'FAILED');
+  console.log('✔ Test 10: Server disk file cleaner removes files >30 mins:', (!oldFileExists && recentFileExists) ? 'PASSED' : 'FAILED');
 
   // Test 11: File deletion when message expires
   const dummyMsgFile = `test-msg-file-${Date.now()}.jpg`;
@@ -138,7 +138,7 @@ async function testApi() {
     type: 'image',
     fileUrl: `/uploads/${dummyMsgFile}`,
     fileName: dummyMsgFile,
-    timestamp: Date.now() - (5 * 60 * 1000) // 5 mins old
+    timestamp: Date.now() - (35 * 60 * 1000) // 35 mins old
   });
 
   roomManager.purgeExpiredMessages();
@@ -157,7 +157,7 @@ async function testApi() {
   });
 
   console.log('\n======================================================');
-  console.log('🎉 ALL 3-MINUTE EPHEMERAL PURGE TESTS VERIFIED!');
+  console.log('🎉 ALL 30-MINUTE EPHEMERAL PURGE TESTS VERIFIED!');
   console.log('======================================================\n');
 }
 
